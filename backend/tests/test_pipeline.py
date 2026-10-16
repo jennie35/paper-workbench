@@ -210,3 +210,10 @@ def test_recovery_after_commit_before_checkpoint(monkeypatch):
         assert len(s.scalars(select(Paper)).all())==1
 
 
+def test_changed_pdf_cannot_reuse_old_source_mapping():
+    from app.pipeline import analyze
+    folder=DATA/'papers'/'changed-source-fixture';folder.mkdir(parents=True,exist_ok=True)
+    make_pdf(folder/'paper.pdf')
+    (folder/'source-fingerprint.json').write_text(json.dumps({'sha256':'old-source-fingerprint'}),'utf-8')
+    with pytest.raises(ValueError,match='正文指纹改变'):
+        analyze(None,None,metadata(),{},folder,lambda stage:None)

@@ -89,4 +89,3 @@ class Analysis(BaseModel):
     required_visual_pages: list[int]
     visuals: list[Visual] = Field(default_factory=list)
     unread: list[str] = Field(default_factory=list)
-

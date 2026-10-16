@@ -98,4 +98,3 @@ class Skill:
             raise ValueError('不支持的操作')
         output = self.run(args, folder)
         (folder / (op + '-log.txt')).write_text(output, 'utf-8')
-

@@ -165,4 +165,3 @@ def export_zip(papers, kind, data_root):
         if kind == 'html':
             z.writestr('index.html', '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>研究文献库</title><h1>研究文献库</h1><p>私人导出 · 研究行动均为待执行方案</p><ul>'+''.join(index)+'</ul></html>')
     return stream.getvalue()
-

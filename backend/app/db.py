@@ -92,4 +92,3 @@ def init_db():
     with session() as s:
         if not s.get(Setting, 'ledger_counter'):
             s.add(Setting(key='ledger_counter', value='0'))
-

@@ -35,4 +35,3 @@ def test_concurrent_registration_uses_real_row_lock(monkeypatch):
         assert len(s.scalars(select(db.ProjectPaper)).all())==1
         assert s.get(db.Setting,'ledger_counter').value=='1'
     engine.dispose()
-

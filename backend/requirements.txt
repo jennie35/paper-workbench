@@ -12,4 +12,3 @@ pypdf==6.20.1
 pypdfium2==5.14.0
 pillow==12.3.0
 markdown-it-py==4.2.0
-

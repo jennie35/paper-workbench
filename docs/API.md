@@ -39,4 +39,3 @@
 原生证据文件遵循外部技能的 `schema_version=1`：paper、claims、evidence、links、branches、actions 和必要的 action_status。来源块 ID 必须来自实际提取的 source_map；不能通过提供一个未获取的 URL 冒充已核验。
 
 错误码：401 会话无效；404 资源不存在；409 活跃批次冲突；413 文件过大；422 请求字段无效；503 队列不可用。提供方响应正文不会直接返回，以防包含敏感配置。
-

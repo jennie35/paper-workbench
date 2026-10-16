@@ -68,4 +68,3 @@ async def run(bundle: UploadFile = File(...), operation: str = Form(...), pages:
                 if path.is_file() and '.engine-tmp' not in path.parts and path.name != 'paper.pdf':
                     archive.write(path, path.relative_to(folder).as_posix())
         return Response(result.getvalue(), media_type='application/zip')
-

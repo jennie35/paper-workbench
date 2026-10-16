@@ -7,4 +7,3 @@ from .db import init_db
 if __name__ == '__main__':
     init_db()
     Worker(['analysis'], connection=Redis.from_url(REDIS_URL)).work(with_scheduler=True)
-

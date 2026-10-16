@@ -81,4 +81,3 @@ def test_private_export(logged):
         assert note.count('分析采用 norman-paper-reading 技能')==1
     result=logged.get(f'/api/projects/{project["id"]}/export?kind=json')
     assert 'artifact_dir' not in result.text
-

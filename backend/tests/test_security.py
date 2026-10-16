@@ -37,4 +37,3 @@ def test_untrusted_markdown_cannot_execute_html():
     assert '<script>' not in svg and '分析者绘制' in svg
     assert '<img' not in rendered_note('![private](https://example.com/collect?secret=private)')
     assert 'assets/page-1.png' in rendered_note('![original](assets/page-1.png)')
-

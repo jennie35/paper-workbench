@@ -364,7 +364,7 @@ async def supply_fulltext(jid: str, index: int, file: UploadFile = File(...)):
         import shutil
         archive = folder / ('revision-' + str(uuid.uuid4()))
         archive.mkdir()
-        for name in ['source', 'assets', 'text-checkpoints.json', 'visual-checkpoints.json', 'draft.json', 'reading-note.md', 'analysis.json', 'evidence.json']:
+        for name in ['source', 'assets', 'source-fingerprint.json', 'text-checkpoints.json', 'visual-checkpoints.json', 'draft.json', 'reading-note.md', 'analysis.json', 'evidence.json']:
             p = folder / name
             if p.exists():
                 shutil.move(str(p), str(archive / name))
@@ -420,4 +420,3 @@ def export(pid: str, kind: str = 'html'):
             p['analysis'].pop('artifact_dir', None)
         return Response(json.dumps(clean, ensure_ascii=False, indent=2), media_type='application/json', headers={'Content-Disposition': 'attachment; filename="papers.json"'})
     return Response(export_zip(papers, kind, DATA), media_type='application/zip', headers={'Content-Disposition': f'attachment; filename="research-{kind}.zip"'})
-

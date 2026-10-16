@@ -89,6 +89,9 @@ def rank_candidates(provider, scope, candidates):
             score = row.get('relevance', 2)
             p = dict(candidates[i], relevance_reason=str(row.get('reason', '')), relevance=score if type(score) is int and 1 <= score <= 3 else 1, relevant=row.get('relevant') is True)
             selected.append(p)
+    for i, candidate in enumerate(candidates):
+        if i not in seen:
+            selected.append(dict(candidate, relevant=False, relevance=0, relevance_reason='模型未提供明确的相关性判断，不纳入精读'))
     # Model ranks substantive relevance; publication/date only break ties within included set.
     return sorted(selected, key=lambda p: (not p['relevant'], -p['relevance'], p['publication_status'] != 'published', -(p.get('year') or 0)))
 
@@ -118,8 +121,13 @@ def analyze(provider, skill, meta, scope, folder, progress):
     texts = inspect_pdf(folder / 'paper.pdf')
     progress('分析')
     source_path = folder / 'source/source_map.json'
+    source_hash = hashlib.sha256((folder / 'paper.pdf').read_bytes()).hexdigest()
+    fingerprint = folder / 'source-fingerprint.json'
+    if fingerprint.exists() and json.loads(fingerprint.read_text('utf-8'))['sha256'] != source_hash:
+        raise ValueError('正文指纹改变，旧检查点不能复用；请通过补充全文入口建立修订')
     if not source_path.exists():
         skill.operation('extract', folder)
+    fingerprint.write_text(json.dumps({'sha256':source_hash}), 'utf-8')
     source_map = json.loads(source_path.read_text('utf-8-sig'))
     blocks = source_map.get('blocks', [])
     if not blocks:
@@ -197,6 +205,7 @@ def analyze(provider, skill, meta, scope, folder, progress):
     if any(x.get('unread') for x in chunks) or a.get('unread'):
         raise ValueError('正文分析仍有未读材料，已保存检查点，不计为完整精读')
     a.update(source_sha256=hashlib.sha256((folder / 'paper.pdf').read_bytes()).hexdigest(), coverage={'text_blocks_read': len(blocks), 'pdf_pages': len(texts), 'visual_pages_checked': visual_pages, 'scope': '主文全文；补充材料仅在已获取并记录时覆盖', 'visual_review': 'model_inspected_original_pages'}, verification_status='全文与选定原图已模型核验；未经独立人工复核', verified=True, artifact_dir=folder.relative_to(DATA).as_posix(), analyzed_date=dt.date.today().isoformat(), reading_skill='norman-paper-reading', reading_mode='extend')
+    a['source_version'] = str(check.get('version', '正文版本尚未确认'))
     progress('校验')
     write_artifacts(folder, meta, a, source_map)
     skill.operation('validate', folder)
@@ -342,4 +351,3 @@ def safe_error(error):
         if not re.search(r'https?://|Bearer |api_key|sk-', value, re.I):
             return value[:600]
     return type(error).__name__ + '：任务未完成；请检查服务连接与配置后重试'
-

@@ -109,4 +109,3 @@ def download(url, path):
             path.unlink(missing_ok=True)
             raise
     raise ValueError('重定向次数过多')
-

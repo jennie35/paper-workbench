@@ -43,4 +43,3 @@ class Provider:
         vision = self.json('读取图片中的校验码，只返回 {"code":"图片中的四位数字"}', [image])
         if text.get('ok') is not True or vision.get('code') != '7319':
             raise ValueError('文本或图像能力检查失败；不能启动完整精读')
-

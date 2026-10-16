@@ -27,4 +27,3 @@ def make_pdf(path):
     p[NameObject('/Resources')]=DictionaryObject({NameObject('/Font'):DictionaryObject({NameObject('/F1'):w._add_object(font)})})
     stream=DecodedStreamObject();stream.set_data(b'BT /F1 12 Tf 30 350 Td (Synthetic test paper. A Researcher. This is a generated fixture for software tests only. It contains no scientific results. Figure 1 is a test of evidence display and source identity handling.) Tj ET')
     p[NameObject('/Contents')]=w._add_object(stream);w.write(path)
-

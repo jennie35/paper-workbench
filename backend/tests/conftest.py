@@ -38,4 +38,3 @@ def logged(client):
     token = client.post('/api/login', json={'password': os.environ['ADMIN_PASSWORD']}).json()['token']
     client.headers['Authorization'] = 'Bearer ' + token
     return client
-

@@ -72,4 +72,3 @@ def search(query, start_year, config):
         else:
             merged.append(p)
     return merged, errors
-

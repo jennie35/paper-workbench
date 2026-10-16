@@ -29,4 +29,3 @@ def test_bridge_rejects_arbitrary_commands(monkeypatch):
     with TestClient(app) as c:
         r=c.post('/run',headers={'Authorization':'Bearer '+token},data={'operation':'shell'},files={'bundle':('input.zip',b'anything')})
         assert r.status_code==400
-
