@@ -41,6 +41,8 @@ GitHub repository ── GitHub Actions ── GitHub Pages
 
 要在自己的电脑实际创建课题、上传和保存资料，可使用[本机使用方式](docs/LOCAL.md)：维护者启动 `python backend/run_local.py` 后，浏览器访问 `http://127.0.0.1:8095/`。此模式不需要 Redis 或 Docker；自动分析仍需配置模型接口。
 
+批次结束后从工作台查看实际完成数、候选和未核验草稿；缺全文或核验失败不会计入完整精读。详见[批次结果与草稿阅读](docs/RESULTS.md)。
+
 部署者可在仓库根目录运行以下命令预览界面，普通在线用户不需要执行：
 
 ```sh

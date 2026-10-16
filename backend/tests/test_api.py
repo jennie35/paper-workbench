@@ -3,16 +3,16 @@ import json
 import os
 import zipfile
 
-from app.db import session, Setting, Paper, ProjectPaper
-from app.pipeline import register
+from app.db import session, Setting, Paper, ProjectPaper, Job
+from app.pipeline import register, candidate_folder
 from app.config import DATA
 from app.artifacts import write_artifacts
-from fixtures import metadata, analysis
+from fixtures import metadata, analysis, make_pdf
 
 
 def test_auth_required(client):
     assert client.get('/health').status_code == 200
-    for path in ['/api/projects','/api/settings','/api/jobs/private','/api/papers/1','/api/papers/1/assets/page-1.png']:
+    for path in ['/api/projects','/api/settings','/api/jobs/private','/api/papers/1','/api/papers/1/assets/page-1.png','/api/jobs/private/candidates/0','/api/jobs/private/candidates/0/pdf','/api/jobs/private/candidates/0/source','/api/jobs/private/candidates/0/assets/page-1.png']:
         assert client.get(path).status_code == 401
 
 
@@ -81,3 +81,102 @@ def test_private_export(logged):
         assert note.count('分析采用 norman-paper-reading 技能')==1
     result=logged.get(f'/api/projects/{project["id"]}/export?kind=json')
     assert 'artifact_dir' not in result.text
+
+
+def candidate_fixture(logged, status='unverified'):
+    """Synthetic candidate artifacts only; no model or network requests."""
+    project = logged.post('/api/projects', json={'name': 'Candidate fixture'}).json()
+    candidate = dict(metadata(doi='10.1234/' + project['id']), status=status, reason='Original figure review incomplete')
+    jid = 'job-' + project['id']
+    with session() as s:
+        s.add(Job(id=jid, project_id=project['id'], status='completed', requested=5, checkpoint=json.dumps({'scope_snapshot': project['scope'], 'candidates': [candidate], 'completed': [], 'shortfall': 5})))
+    folder = candidate_folder(candidate, project['scope'])
+    (folder / 'assets').mkdir(parents=True, exist_ok=True)
+    return jid, folder
+
+
+def test_candidate_partial_content_without_false_completion(logged):
+    jid, folder = candidate_fixture(logged)
+    draft = analysis()
+    # Even a file produced before final structural validation cannot imply completion.
+    draft.update(verified=True, artifact_dir='private/absolute/location')
+    (folder / 'analysis.json').write_text(json.dumps(draft), 'utf-8')
+    (folder / 'text-checkpoints.json').write_text(json.dumps([{'notes': 'Generated fixture notes', 'unread': [], 'visual_pages': [1, 2]}]), 'utf-8')
+    observed = {'page': 99, 'label': 'Figure 1', 'kind': 'figure', 'explanation': 'Synthetic observation', 'limitations': 'Fixture only'}
+    (folder / 'visual-checkpoints.json').write_text(json.dumps({'1': {'readable': True, 'items': [observed]}, '2': {'readable': False}, '3': {'readable': True, 'unread': ['Unclear equation']}}), 'utf-8')
+    (folder / 'assets/page-1.png').write_bytes(b'synthetic-image')
+    (folder / 'assets/page-2.png').write_bytes(b'synthetic-image')
+    data = logged.get(f'/api/jobs/{jid}/candidates/0').json()
+    assert data['analysis']['summary'] == draft['summary']
+    assert data['analysis']['verified'] is False
+    assert data['analysis']['provisional'] is True
+    assert data['analysis']['verification_gaps'] == ['Original figure review incomplete']
+    assert 'artifact_dir' not in data['analysis']
+    assert data['reading_notes'][0]['notes'] == 'Generated fixture notes'
+    assert data['artifacts']['image_pages'] == [1, 2]
+    assert data['artifacts']['checked_visual_pages'] == [1]
+    assert data['analysis']['visuals'] == [dict(observed, page=1)]
+    assert logged.get(f'/api/jobs/{jid}/candidates/0/assets/page-1.png').content == b'synthetic-image'
+    flow = logged.get(f'/api/jobs/{jid}/candidates/0/assets/research-flow.svg')
+    assert flow.status_code == 200
+    assert '分析者绘制' in flow.text
+    assert 'sandbox' in flow.headers['Content-Security-Policy']
+    assert logged.get('/api/papers/1').status_code == 404
+
+
+def test_candidate_prefers_provisional_and_tolerates_incomplete_files(logged):
+    jid, folder = candidate_fixture(logged)
+    (folder / 'draft.json').write_text(json.dumps(analysis()), 'utf-8')
+    partial = dict(analysis(), summary='New partial figure findings', verified=False)
+    (folder / 'provisional.json').write_text(json.dumps(partial), 'utf-8')
+    (folder / 'text-checkpoints.json').write_text('{not finished', 'utf-8')
+    result = logged.get(f'/api/jobs/{jid}/candidates/0')
+    assert result.status_code == 200
+    assert result.json()['analysis']['summary'] == 'New partial figure findings'
+    assert result.json()['reading_notes'] == []
+    (folder / 'provisional.json').write_text('{not finished', 'utf-8')
+    assert logged.get(f'/api/jobs/{jid}/candidates/0').json()['analysis']['summary'] == analysis()['summary']
+
+
+def test_candidate_source_and_pdf_are_explicit_and_confined(logged, monkeypatch, tmp_path):
+    jid, folder = candidate_fixture(logged)
+    assert logged.get(f'/api/jobs/{jid}/candidates/0/pdf').status_code == 404
+    make_pdf(folder / 'paper.pdf')
+    source = folder / 'source'
+    source.mkdir()
+    (source / 'source_map.json').write_text(json.dumps({'pdf_path': 'PRIVATE-LOCAL-PATH', 'blocks': [{'id': 'B1', 'page': 1, 'text': 'Fixture first page', 'path': 'PRIVATE-LOCAL-PATH'}, {'id': 'B2', 'page': 2, 'text': 'Fixture second page'}]}), 'utf-8')
+    response = logged.get(f'/api/jobs/{jid}/candidates/0/source?page=2')
+    assert response.json()['blocks'] == [{'id': 'B2', 'page': 2, 'text': 'Fixture second page'}]
+    assert response.json()['pages'] == [1, 2]
+    assert 'PRIVATE-LOCAL-PATH' not in logged.get(f'/api/jobs/{jid}/candidates/0/source').text
+    assert logged.get(f'/api/jobs/{jid}/candidates/0/source?page=0').status_code == 400
+    pdf = logged.get(f'/api/jobs/{jid}/candidates/0/pdf')
+    assert pdf.content.startswith(b'%PDF-')
+    assert pdf.headers['content-type'] == 'application/pdf'
+    for suffix in ['assets/paper.pdf', 'assets/source-fingerprint.json', 'assets/page-0.png', 'assets/missing.png']:
+        assert logged.get(f'/api/jobs/{jid}/candidates/0/{suffix}').status_code == 404
+    assert logged.get(f'/api/jobs/{jid}/candidates/-1').status_code == 404
+    assert logged.get(f'/api/jobs/{jid}/candidates/1').status_code == 404
+    monkeypatch.setattr('app.pipeline.candidate_folder', lambda *args: tmp_path)
+    assert logged.get(f'/api/jobs/{jid}/candidates/0').status_code == 404
+
+
+def test_candidate_without_fulltext_stays_empty(logged):
+    jid, _ = candidate_fixture(logged, status='no_fulltext')
+    data = logged.get(f'/api/jobs/{jid}/candidates/0').json()
+    assert data['analysis'] is None
+    assert data['reading_notes'] == []
+    assert data['artifacts'] == {'pdf_available': False, 'source_available': False, 'analysis_available': False, 'image_pages': [], 'checked_visual_pages': []}
+
+
+def test_replacement_pdf_archives_provisional_analysis(logged):
+    jid, folder = candidate_fixture(logged)
+    make_pdf(folder / 'paper.pdf')
+    old_partial = dict(analysis(), summary='Old source partial')
+    (folder / 'provisional.json').write_text(json.dumps(old_partial), 'utf-8')
+    replacement = (folder / 'paper.pdf').read_bytes() + b'\n% Revised generated fixture\n'
+    result = logged.post(f'/api/jobs/{jid}/candidates/0/pdf', files={'file': ('replacement.pdf', replacement, 'application/pdf')})
+    assert result.status_code == 200
+    assert not (folder / 'provisional.json').exists()
+    assert len(list(folder.glob('revision-*/provisional.json'))) == 1
+    assert logged.get(f'/api/jobs/{jid}/candidates/0').json()['analysis'] is None

@@ -3,6 +3,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import threading
 import time
@@ -25,7 +26,7 @@ from .security import encryption, password_hash, check_password, issue_token, va
 from .pipeline import configuration, safe_error
 from .provider import Provider
 from .skill import Skill
-from .artifacts import inspect_pdf, challenge_image, export_zip
+from .artifacts import inspect_pdf, challenge_image, export_zip, flow_svg
 
 
 @asynccontextmanager
@@ -372,6 +373,146 @@ def retry_job(jid: str):
     return {'id': jid, 'status': 'queued'}
 
 
+def candidate_context(jid, index):
+    """Locate only this authenticated candidate's cache, never a client-supplied path."""
+    from .pipeline import candidate_folder
+    with session() as s:
+        job = s.get(Job, jid)
+        if not job:
+            raise HTTPException(404, '任务不存在')
+        state = json.loads(job.checkpoint)
+        candidates = state.get('candidates', [])
+        if index < 0 or index >= len(candidates):
+            raise HTTPException(404, '候选不存在')
+        candidate = candidates[index]
+        scope = state.get('scope_snapshot') or json.loads(get_project(s, job.project_id).scope)
+        root = candidate_folder(candidate, scope).resolve()
+        if not root.is_relative_to(DATA.resolve()):
+            raise HTTPException(404, '候选资源不存在')
+        return candidate, root, job.project_id
+
+
+def candidate_file(root, name):
+    path = (root / name).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        return None
+    return path
+
+
+def read_candidate_json(root, name, default=None):
+    path = candidate_file(root, name)
+    if not path:
+        return default
+    try:
+        return json.loads(path.read_text('utf-8-sig'))
+    except (OSError, ValueError):
+        # A worker may be replacing a checkpoint. Existing other checkpoints remain readable.
+        return default
+
+
+def reviewed_visuals(root):
+    visual = read_candidate_json(root, 'visual-checkpoints.json', {})
+    if not isinstance(visual, dict):
+        return []
+    return sorted((int(page), record) for page, record in visual.items() if str(page).isdigit() and 1 <= int(page) <= 300 and isinstance(record, dict) and record.get('readable') is True and not record.get('unread'))
+
+
+def candidate_analysis(root, candidate):
+    filenames = ('analysis.json', 'provisional.json', 'draft.json') if candidate.get('status') == 'completed' else ('provisional.json', 'analysis.json', 'draft.json')
+    analysis = None
+    for name in filenames:
+        value = read_candidate_json(root, name)
+        if isinstance(value, dict):
+            analysis = value
+            break
+    if analysis is None:
+        return None
+    analysis.pop('artifact_dir', None)
+    if candidate.get('status') != 'completed':
+        # A saved analysis file can precede structural validation and ledger registration.
+        # Its mere existence must never upgrade the candidate to a completed deep read.
+        analysis.update(verified=False, provisional=True, verification_status='未完成核验的临时分析；不计入已完成精读')
+        gaps = analysis.get('verification_gaps', [])
+        gaps = list(gaps) if isinstance(gaps, list) else []
+        if candidate.get('reason') and candidate['reason'] not in gaps:
+            gaps.append(candidate['reason'])
+        analysis['verification_gaps'] = gaps or ['精读、图表或结构校验尚未全部通过']
+        # Legacy drafts were saved before any visual review. Recover only observations
+        # that the worker actually persisted; acquired image files alone prove nothing.
+        visual = reviewed_visuals(root)
+        if visual:
+            analysis['visuals'] = [dict(item, page=page) for page, record in visual if isinstance(record.get('items'), list) for item in record['items'] if isinstance(item, dict)]
+    return analysis
+
+
+@app.get('/api/jobs/{jid}/candidates/{index}', dependencies=[Depends(auth)])
+def get_candidate(jid: str, index: int):
+    candidate, root, project_id = candidate_context(jid, index)
+    analysis = candidate_analysis(root, candidate)
+    text = read_candidate_json(root, 'text-checkpoints.json', [])
+    text = text if isinstance(text, list) else []
+    image_pages = []
+    assets = root / 'assets'
+    if assets.is_dir():
+        for image in assets.glob('page-*.png'):
+            match = re.fullmatch(r'page-([1-9]\d*)\.png', image.name)
+            if match and candidate_file(root, 'assets/' + image.name):
+                image_pages.append(int(match[1]))
+    checked = [page for page, _ in reviewed_visuals(root)]
+    return {
+        'index': index, 'job_id': jid, 'project_id': project_id,
+        'candidate': candidate, 'analysis': analysis,
+        'reading_notes': [dict(index=i, notes=row.get('notes', ''), unread=row.get('unread', []), visual_pages=row.get('visual_pages', [])) for i, row in enumerate(text) if isinstance(row, dict)],
+        'artifacts': {
+            'pdf_available': bool(candidate_file(root, 'paper.pdf')),
+            'source_available': bool(candidate_file(root, 'source/source_map.json')),
+            'analysis_available': analysis is not None,
+            'image_pages': sorted(set(image_pages)), 'checked_visual_pages': checked,
+        },
+        'notice': '候选及临时分析不计入已完成精读；图片已获取和实际核验分开记录。' if candidate.get('status') != 'completed' else '该候选已登记；核验范围以分析记录为准。',
+    }
+
+
+@app.get('/api/jobs/{jid}/candidates/{index}/assets/{filename}', dependencies=[Depends(auth)])
+def candidate_asset(jid: str, index: int, filename: str):
+    if not re.fullmatch(r'(?:page-[1-9]\d*\.png|research-flow\.svg)', filename):
+        raise HTTPException(404, '资源不存在')
+    candidate, root, _ = candidate_context(jid, index)
+    path = candidate_file(root, 'assets/' + filename)
+    security_headers = {'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox"}
+    if path:
+        return FileResponse(path, headers=security_headers)
+    if filename == 'research-flow.svg':
+        a = candidate_analysis(root, candidate)
+        if a and isinstance(a.get('flow_steps'), list) and a['flow_steps']:
+            return Response(flow_svg(a['flow_steps']), media_type='image/svg+xml', headers=security_headers)
+    raise HTTPException(404, '资源尚未取得')
+
+
+@app.get('/api/jobs/{jid}/candidates/{index}/pdf', dependencies=[Depends(auth)])
+def candidate_pdf(jid: str, index: int):
+    _, root, _ = candidate_context(jid, index)
+    path = candidate_file(root, 'paper.pdf')
+    if not path:
+        raise HTTPException(404, '全文尚未取得，可上传可读取的论文 PDF')
+    return FileResponse(path, media_type='application/pdf', filename='paper.pdf', content_disposition_type='inline', headers={'Content-Security-Policy': "default-src 'none'; sandbox"})
+
+
+@app.get('/api/jobs/{jid}/candidates/{index}/source', dependencies=[Depends(auth)])
+def candidate_source(jid: str, index: int, page: int | None = None):
+    if page is not None and not 1 <= page <= 300:
+        raise HTTPException(400, '页码必须在 1–300 之间')
+    _, root, _ = candidate_context(jid, index)
+    source = read_candidate_json(root, 'source/source_map.json')
+    if not isinstance(source, dict) or not isinstance(source.get('blocks'), list):
+        raise HTTPException(404, '正文来源映射尚未取得')
+    blocks = [b for b in source['blocks'] if isinstance(b, dict)]
+    pages = sorted({b['page'] for b in blocks if type(b.get('page')) is int})
+    visible = [b for b in blocks if page is None or b.get('page') == page]
+    # Source maps can also contain private absolute paths; return reading locators only.
+    return {'page': page, 'pages': pages, 'total_blocks': len(blocks), 'blocks': [{key: b[key] for key in ('id', 'page', 'text', 'locator', 'heading', 'type') if key in b} for b in visible], 'notice': '提取正文用于定位，不表示对应结论或原图已核验。'}
+
+
 @app.post('/api/jobs/{jid}/candidates/{index}/pdf', dependencies=[Depends(auth)])
 async def supply_fulltext(jid: str, index: int, file: UploadFile = File(...)):
     from .pipeline import candidate_folder
@@ -399,7 +540,7 @@ async def supply_fulltext(jid: str, index: int, file: UploadFile = File(...)):
         import shutil
         archive = folder / ('revision-' + str(uuid.uuid4()))
         archive.mkdir()
-        for name in ['source', 'assets', 'source-fingerprint.json', 'text-checkpoints.json', 'visual-checkpoints.json', 'draft.json', 'reading-note.md', 'analysis.json', 'evidence.json']:
+        for name in ['source', 'assets', 'source-fingerprint.json', 'text-checkpoints.json', 'visual-checkpoints.json', 'draft.json', 'provisional.json', 'reading-note.md', 'analysis.json', 'evidence.json']:
             p = folder / name
             if p.exists():
                 shutil.move(str(p), str(archive / name))

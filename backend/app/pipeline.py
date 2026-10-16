@@ -173,45 +173,81 @@ def analyze(provider, skill, meta, scope, folder, progress):
     inspected = json.loads(visual_records.read_text('utf-8')) if visual_records.exists() else {}
     assets = folder / 'assets'
     assets.mkdir(exist_ok=True)
-    for page in visual_pages:
-        if str(page) in inspected:
-            continue
-        progress('图表核验')
-        image = assets / f'page-{page}.png'
-        if not image.exists():
-            before = set(assets.glob('*.png'))
-            skill.operation('render', folder, [page])
-            new = sorted(set(assets.glob('*.png')) - before)
-            if len(new) != 1:
-                raise ValueError('原图渲染结果无法唯一对应页码')
-            new[0].replace(image)
-        result = provider.json(f'这是原论文完整PDF第{page}页。必须实际读取图像，核对本页图表/公式，包括子图、图注、坐标、单位、表头、数值和脚注。只讨论实际可见内容。返回 {{"readable":true,"items":[{{"page":{page},"label":"原文图表或公式编号","kind":"figure或table或equation","explanation":"为什么做、方法、如何读、可见观察、支持边界与下一问题；公式含符号单位假设","limitations":"不清晰或未能核对的部分"}}],"unread":[]}}。无法辨读设 readable=false，不猜测。', [image])
-        if result.get('readable') is not True or result.get('unread'):
-            raise ValueError(f'PDF 第 {page} 页图表或公式未能可靠核验')
-        for item in result.get('items', []):
-            item['page'] = page
-        inspected[str(page)] = result
-        visual_records.write_text(json.dumps(inspected, ensure_ascii=False), 'utf-8')
-    a['visuals'] = [item for result in inspected.values() for item in result.get('items', [])]
-    # Reconcile text-derived conclusions after inspecting originals; do not append visuals to an unchanged draft.
-    if visual_pages:
-        revised = provider.json('根据原图实际核验记录，修正此前文本分析中的结论、数字、边界和研究行动；保留 Schema 的全部字段，不能删掉来源定位或把建议写成实验。返回完整分析 JSON。\nSchema:'+json.dumps(Analysis.model_json_schema(), ensure_ascii=False)+'\n原分析：'+json.dumps(a, ensure_ascii=False)+'\n实际视觉核验：'+json.dumps(inspected, ensure_ascii=False))
-        revised['visuals'] = a['visuals']
-        a = revised
-    validate_analysis(a, source_map, len(texts))
-    missing_pages = set(a['required_visual_pages']) - set(visual_pages)
-    if missing_pages:
-        raise ValueError('复核后发现额外关键原图页，需要重试补充核验：'+str(sorted(missing_pages)))
-    if any(x.get('unread') for x in chunks) or a.get('unread'):
-        raise ValueError('正文分析仍有未读材料，已保存检查点，不计为完整精读')
-    a.update(source_sha256=hashlib.sha256((folder / 'paper.pdf').read_bytes()).hexdigest(), coverage={'text_blocks_read': len(blocks), 'pdf_pages': len(texts), 'visual_pages_checked': visual_pages, 'scope': '主文全文；补充材料仅在已获取并记录时覆盖', 'visual_review': 'model_inspected_original_pages'}, verification_status='全文与选定原图已模型核验；未经独立人工复核', verified=True, artifact_dir=folder.relative_to(DATA).as_posix(), analyzed_date=dt.date.today().isoformat(), reading_skill='norman-paper-reading', reading_mode='extend')
-    a['source_version'] = str(check.get('version', '正文版本尚未确认'))
-    progress('校验')
-    write_artifacts(folder, meta, a, source_map)
-    skill.operation('validate', folder)
-    a['structural_validation'] = 'norman_native_passed'
-    write_artifacts(folder, meta, a, source_map)
-    return a
+    provisional_file = folder / 'provisional.json'
+
+    def preserve_partial(gaps):
+        """Expose useful checkpoints without promoting a candidate into the ledger."""
+        checked = {key: value for key, value in inspected.items() if value.get('readable') is True and not value.get('unread')}
+        unread = [str(item) for chunk in chunks for item in chunk.get('unread', [])] + list(a.get('unread', []))
+        partial = dict(a, visuals=[item for result in checked.values() for item in result.get('items', [])],
+                       verified=False, provisional=True, verification_status='unverified',
+                       verification_gaps=list(dict.fromkeys([*gaps, *unread])),
+                       source_sha256=source_hash, source_version=str(check.get('version', '正文版本尚未确认')),
+                       artifact_dir=folder.relative_to(DATA).as_posix(), analyzed_date=dt.date.today().isoformat(),
+                       reading_skill='norman-paper-reading', reading_mode='extend',
+                       coverage={'text_blocks_processed': len(blocks),
+                                 'text_blocks_read': sum(len(group) for group, chunk in zip(groups, chunks) if not chunk.get('unread')),
+                                 'pdf_pages': len(texts), 'visual_pages_checked': sorted(int(page) for page in checked),
+                                 'required_visual_pages': sorted(set(visual_pages) | set(a['required_visual_pages'])),
+                                 'scope': '正文分析检查点；未读内容及未完成核验项目见缺口记录',
+                                 'visual_review': 'partial_model_inspection' if checked else 'not_completed'})
+        partial.pop('structural_validation', None)
+        temporary = provisional_file.with_suffix('.json.tmp')
+        temporary.write_text(json.dumps(partial, ensure_ascii=False), 'utf-8')
+        temporary.replace(provisional_file)
+
+    preserve_partial(['图表核验与结构校验尚未完成；当前内容为临时分析，不计完整精读'])
+    try:
+        for page in visual_pages:
+            previous = inspected.get(str(page), {})
+            if previous.get('readable') is True and not previous.get('unread'):
+                continue
+            progress('图表核验')
+            image = assets / f'page-{page}.png'
+            if not image.exists():
+                before = set(assets.glob('*.png'))
+                skill.operation('render', folder, [page])
+                new = sorted(set(assets.glob('*.png')) - before)
+                if len(new) != 1:
+                    raise ValueError('原图渲染结果无法唯一对应页码')
+                new[0].replace(image)
+            result = provider.json(f'这是原论文完整PDF第{page}页。必须实际读取图像，核对本页图表/公式，包括子图、图注、坐标、单位、表头、数值和脚注。只讨论实际可见内容。返回 {{"readable":true,"items":[{{"page":{page},"label":"原文图表或公式编号","kind":"figure或table或equation","explanation":"为什么做、方法、如何读、可见观察、支持边界与下一问题；公式含符号单位假设","limitations":"不清晰或未能核对的部分"}}],"unread":[]}}。无法辨读设 readable=false，不猜测。', [image])
+            if result.get('readable') is not True or result.get('unread'):
+                raise ValueError(f'PDF 第 {page} 页图表或公式未能可靠核验')
+            for item in result.get('items', []):
+                item['page'] = page
+            inspected[str(page)] = result
+            visual_records.write_text(json.dumps(inspected, ensure_ascii=False), 'utf-8')
+            preserve_partial(['已保存部分原图核验记录；全文结论复核与结构校验尚未完成'])
+        a['visuals'] = [item for result in inspected.values() for item in result.get('items', [])]
+        # Reconcile text-derived conclusions after inspecting originals; do not append visuals to an unchanged draft.
+        if visual_pages:
+            revised = provider.json('根据原图实际核验记录，修正此前文本分析中的结论、数字、边界和研究行动；保留 Schema 的全部字段，不能删掉来源定位或把建议写成实验。返回完整分析 JSON。\nSchema:'+json.dumps(Analysis.model_json_schema(), ensure_ascii=False)+'\n原分析：'+json.dumps(a, ensure_ascii=False)+'\n实际视觉核验：'+json.dumps(inspected, ensure_ascii=False))
+            revised['visuals'] = a['visuals']
+            validate_analysis(revised, source_map, len(texts))
+            a = revised
+        validate_analysis(a, source_map, len(texts))
+        preserve_partial(['原图复核后的分析已保存；完整性与结构校验尚未完成'])
+        missing_pages = set(a['required_visual_pages']) - set(visual_pages)
+        if missing_pages:
+            raise ValueError('复核后发现额外关键原图页，需要重试补充核验：'+str(sorted(missing_pages)))
+        if any(x.get('unread') for x in chunks) or a.get('unread'):
+            raise ValueError('正文分析仍有未读材料，已保存检查点，不计为完整精读')
+        a.update(source_sha256=source_hash, coverage={'text_blocks_read': len(blocks), 'pdf_pages': len(texts), 'visual_pages_checked': visual_pages, 'scope': '主文全文；补充材料仅在已获取并记录时覆盖', 'visual_review': 'model_inspected_original_pages'}, verification_status='unverified', verified=False, artifact_dir=folder.relative_to(DATA).as_posix(), analyzed_date=dt.date.today().isoformat(), reading_skill='norman-paper-reading', reading_mode='extend')
+        a['source_version'] = str(check.get('version', '正文版本尚未确认'))
+        a.pop('structural_validation', None)
+        a.pop('provisional', None)
+        a.pop('verification_gaps', None)
+        progress('校验')
+        write_artifacts(folder, meta, a, source_map)
+        skill.operation('validate', folder)
+        a.update(structural_validation='norman_native_passed', verified=True, verification_status='全文与选定原图已模型核验；未经独立人工复核')
+        write_artifacts(folder, meta, a, source_map)
+        provisional_file.unlink(missing_ok=True)
+        return a
+    except Exception as exc:
+        preserve_partial([safe_error(exc), '当前结果尚未通过全部精读要求，不计完成篇数'])
+        raise
 
 
 def run_job(job_id):
