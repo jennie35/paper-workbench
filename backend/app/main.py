@@ -8,6 +8,7 @@ import threading
 import time
 import uuid
 from contextlib import asynccontextmanager
+from functools import wraps
 
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -17,7 +18,7 @@ from redis import Redis
 from rq import Queue, Retry
 from sqlalchemy import select
 
-from .config import DATA, REDIS_URL, ALLOWED_ORIGINS, MAX_BYTES
+from .config import DATA, REDIS_URL, ALLOWED_ORIGINS, MAX_BYTES, TASK_BACKEND
 from .db import init_db, session, Project, Reference, Job, Paper, Setting, ProjectPaper, now
 from .schemas import Login, ProjectInput, ProviderInput, Scope, BatchInput
 from .security import encryption, password_hash, check_password, issue_token, valid_token, public_url
@@ -41,7 +42,15 @@ async def lifespan(app):
             s.add(Setting(key='admin_password', value=password_hash(password)))
         elif not check_password(password, row.value):
             row.value = password_hash(password)
-    yield
+    if TASK_BACKEND == 'local':
+        from .local_tasks import recover
+        recover()
+    try:
+        yield
+    finally:
+        if TASK_BACKEND == 'local':
+            from .local_tasks import shutdown
+            shutdown()
 
 
 app = FastAPI(title='Paper Workbench API', version='0.1.0', lifespan=lifespan)
@@ -229,6 +238,9 @@ def infer_scope(pid: str):
 
 
 def enqueue(jid):
+    if TASK_BACKEND == 'local':
+        from .local_tasks import enqueue as local_enqueue
+        return local_enqueue(jid)
     q = Queue('analysis', connection=Redis.from_url(REDIS_URL))
     old = q.fetch_job(jid)
     if old and str(old.get_status()).split('.')[-1].lower() in ('failed', 'finished', 'stopped', 'canceled'):
@@ -239,6 +251,16 @@ def enqueue(jid):
 def reconcile_job(j):
     """Make worker crashes/timeouts recoverable from the browser after RQ settles."""
     if j.status not in ('queued', 'running'):
+        return
+    if TASK_BACKEND == 'local':
+        from .local_tasks import task_state
+        state = task_state(j.id)
+        if state in ('failed', 'finished', 'missing'):
+            from sqlalchemy.orm import object_session
+            object_session(j).refresh(j)
+            stale = time.time() - __import__('datetime').datetime.fromisoformat(j.updated_at).timestamp() > 120
+            if j.status in ('queued', 'running') and (state != 'missing' or stale):
+                j.status, j.error = 'failed', '本机任务已中断；检查点保留，可重试'
         return
     try:
         q = Queue('analysis', connection=Redis.from_url(REDIS_URL, socket_connect_timeout=2, socket_timeout=2))
@@ -253,7 +275,19 @@ def reconcile_job(j):
         pass
 
 
+_admission_lock = threading.RLock()
+
+
+def serialized_admission(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        with _admission_lock:
+            return fn(*args, **kwargs)
+    return wrapped
+
+
 @app.post('/api/projects/{pid}/jobs', dependencies=[Depends(auth)])
+@serialized_admission
 def start_job(pid: str, payload: BatchInput):
     configuration()
     Skill().preflight()
@@ -310,6 +344,7 @@ def cancel_job(jid: str):
 
 
 @app.post('/api/jobs/{jid}/retry', dependencies=[Depends(auth)])
+@serialized_admission
 def retry_job(jid: str):
     with session() as s:
         s.execute(select(Setting).where(Setting.key == 'ledger_counter').with_for_update()).scalar_one()
@@ -420,3 +455,9 @@ def export(pid: str, kind: str = 'html'):
             p['analysis'].pop('artifact_dir', None)
         return Response(json.dumps(clean, ensure_ascii=False, indent=2), media_type='application/json', headers={'Content-Disposition': 'attachment; filename="papers.json"'})
     return Response(export_zip(papers, kind, DATA), media_type='application/zip', headers={'Content-Disposition': f'attachment; filename="research-{kind}.zip"'})
+
+
+if os.getenv('SERVE_FRONTEND') == '1':
+    from fastapi.staticfiles import StaticFiles
+    frontend = Path(os.getenv('FRONTEND_DIR', str(Path(__file__).resolve().parents[2] / 'frontend')))
+    app.mount('/', StaticFiles(directory=frontend, html=True), name='frontend')

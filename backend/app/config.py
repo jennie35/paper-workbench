@@ -9,3 +9,4 @@ ALLOWED_ORIGINS = [x.strip() for x in os.getenv('ALLOWED_ORIGINS', 'http://local
 MAX_BYTES = 50 * 1024 * 1024
 MAX_PAGES = 300
 STAGES = ['检索', '去重', '获取全文', '分析', '图表核验', '校验', '完成']
+TASK_BACKEND = os.getenv('TASK_BACKEND', 'rq')

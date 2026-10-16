@@ -215,6 +215,11 @@ def analyze(provider, skill, meta, scope, folder, progress):
 
 
 def run_job(job_id):
+    from .config import TASK_BACKEND
+    if TASK_BACKEND == 'local':
+        from .local_tasks import analysis_lock
+        with analysis_lock:
+            return _run_job(job_id)
     from redis import Redis
     from redis.exceptions import LockError
     from .config import REDIS_URL

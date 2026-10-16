@@ -90,7 +90,8 @@ async function showPaper(id){
 }
 
 function connectionForm(){
-  showModal('CONNECT · 私人服务',`<h2>连接你的研究空间</h2><p>GitHub Pages 展示界面；私人服务保存论文、台账并运行分析。示例演示不消耗 API。</p><div class="callout">这里使用私人后台的登录口令，与 GitHub、Codex 登录无关。后台尚未部署时，请先浏览示例演示。</div><form id="connectForm">${field('后端 HTTPS 地址','backendUrl',state.base,'url','填写已运行的私人后台根地址，不是 GitHub 仓库或模型 API 地址。开发环境可使用 localhost。')}${field('管理员口令','adminPassword','','password','由部署者通过后台环境变量 ADMIN_PASSWORD 设置；项目没有默认口令。')}<p id="formMessage"></p><div class="form-actions"><button type="button" class="quiet" id="keepDemo">继续示例演示</button><button class="primary" type="submit">连接并登录 →</button></div></form>`);
+  const localBase=['localhost','127.0.0.1'].includes(location.hostname)?location.origin:'';
+  showModal('CONNECT · 私人服务',`<h2>连接你的研究空间</h2><p>私人服务保存论文、台账并运行分析。示例演示不消耗 API。</p><div class="callout">这里使用私人后台的登录口令，与 GitHub、Codex 登录无关。本机版由启动程序生成独立口令；公网版由部署者设置。</div><form id="connectForm">${field('后台地址','backendUrl',state.base||localBase,'url','填写已运行的私人后台根地址，不是 GitHub 仓库或模型 API 地址。')}${field('管理员口令','adminPassword','','password','使用本机启动程序提供的口令，或公网后台的 ADMIN_PASSWORD；没有通用默认口令。')}<p id="formMessage"></p><div class="form-actions"><button type="button" class="quiet" id="keepDemo">继续示例演示</button><button class="primary" type="submit">连接并登录 →</button></div></form>`);
   $('keepDemo').onclick=()=>{closeModal();enterDemo();};
   $('connectForm').onsubmit=async e=>{e.preventDefault();const button=e.submitter;button.disabled=true;try{
     const url=new URL($('backendUrl').value.trim());if(url.username||url.password||url.search||url.hash)throw new Error('服务地址不能包含凭据、查询参数或片段');if(url.protocol!=='https:'&&!(url.protocol==='http:'&&['localhost','127.0.0.1'].includes(url.hostname)))throw new Error('线上服务必须使用 HTTPS');
