@@ -256,7 +256,7 @@ def _run_job(job_id, heartbeat=lambda: None, provider=None, skill=None):
         checkpoint(job_id, state, stage, 'running')
 
     try:
-        progress('检索')
+        progress('接口预检')
         cfg = configuration() if provider is None else getattr(provider, 'config', {})
         provider, skill = provider or Provider(cfg), skill or Skill()
         skill.preflight()

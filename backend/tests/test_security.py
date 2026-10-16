@@ -20,6 +20,29 @@ def test_dns_rebinding_rejected():
             safe_request('GET','https://example.com/test')
 
 
+@pytest.mark.parametrize('host,uses_proxy', [('api.openai.com', True), ('example.com', False), ('api.openai.com.example.com', False)])
+def test_official_proxy_is_allowlisted_and_other_endpoints_stay_pinned(monkeypatch, host, uses_proxy):
+    monkeypatch.setenv('OPENAI_HTTP_PROXY', 'http://127.0.0.1:7890')
+    addresses = [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('8.8.8.8', 443))]
+    with patch('app.security.socket.getaddrinfo', return_value=addresses), patch('app.security.httpx.Client') as client:
+        safe_request('GET', f'https://{host}/v1/models')
+        options = client.call_args.kwargs
+        assert options['trust_env'] is False and options['follow_redirects'] is False
+        assert ('proxy' in options) is uses_proxy
+        request = client.return_value.__enter__.return_value.request.call_args
+        assert request.args[1] == (f'https://{host}/v1/models' if uses_proxy else 'https://8.8.8.8/v1/models')
+        assert request.kwargs['headers']['Host'] == host
+
+
+def test_proxy_does_not_bypass_private_destination_guard(monkeypatch):
+    monkeypatch.setenv('OPENAI_HTTP_PROXY', 'http://127.0.0.1:7890')
+    addresses = [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('127.0.0.1', 443))]
+    with patch('app.security.socket.getaddrinfo', return_value=addresses), patch('app.security.httpx.Client') as client:
+        with pytest.raises(ValueError, match='内部地址'):
+            safe_request('GET', 'https://api.openai.com/v1/models')
+        client.assert_not_called()
+
+
 def test_password_and_token_tampering():
     saved=password_hash('long-password')
     assert check_password('long-password',saved)

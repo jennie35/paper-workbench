@@ -23,7 +23,14 @@ class Provider:
             content.append({'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + base64.b64encode(p.read_bytes()).decode(), 'detail': 'high'}})
         payload = {'model': self.config['vision_model' if images else 'text_model'], 'messages': [{'role': 'system', 'content': system}, {'role': 'user', 'content': content if images else prompt}]}
         for attempt in range(3):
-            r = safe_request('POST', self.base + '/chat/completions', headers={'Authorization': 'Bearer ' + self.config['api_key']}, json=payload)
+            try:
+                r = safe_request('POST', self.base + '/chat/completions', headers={'Authorization': 'Bearer ' + self.config['api_key']}, json=payload)
+            except httpx.ConnectTimeout:
+                raise ValueError('模型 API 连接超时：后端未能建立 HTTPS 连接。请检查模型基础地址、后端网络及代理；此错误尚不能判断密钥是否有效。') from None
+            except httpx.ConnectError:
+                raise ValueError('模型 API 连接失败：请检查后端网络、代理及 HTTPS 证书配置。') from None
+            except httpx.ReadTimeout:
+                raise ValueError('模型 API 响应超时：连接已建立，但未及时收到完整响应，请稍后重试。') from None
             if r.status_code in (429, 502, 503, 504) and attempt < 2:
                 time.sleep(2 ** attempt)
                 continue

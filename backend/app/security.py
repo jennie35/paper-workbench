@@ -70,8 +70,11 @@ def safe_request(method, url, **kwargs):
     pinned = url.replace('https://' + parsed.netloc, 'https://' + ('[' + ip + ']' if ':' in ip else ip), 1)
     headers = dict(kwargs.pop('headers', {}), Host=parsed.hostname)
     timeout = kwargs.pop('timeout', 180)
-    with httpx.Client(timeout=timeout, trust_env=False, follow_redirects=False) as c:
-        return c.request(method, pinned, headers=headers, extensions={'sni_hostname': parsed.hostname.encode()}, **kwargs)
+    # A trusted deployment proxy may resolve this fixed official host remotely.
+    # Arbitrary configured endpoints and all PDF downloads remain IP-pinned.
+    proxy = os.getenv('OPENAI_HTTP_PROXY') if parsed.hostname == 'api.openai.com' else None
+    with httpx.Client(timeout=timeout, trust_env=False, follow_redirects=False, **({'proxy': proxy} if proxy else {})) as c:
+        return c.request(method, url if proxy else pinned, headers=headers, extensions={'sni_hostname': parsed.hostname.encode()}, **kwargs)
 
 
 def download(url, path):

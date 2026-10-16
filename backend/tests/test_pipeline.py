@@ -107,6 +107,22 @@ def test_missing_skill_fails_honestly(monkeypatch):
         assert '缺失' in j.error
 
 
+def test_model_preflight_failure_has_own_stage_without_search(monkeypatch):
+    _, jid = project_job()
+    class OfflineProvider(FakeProvider):
+        def preflight(self, image):
+            raise ValueError('模型 API 连接超时')
+    monkeypatch.setattr('app.pipeline.challenge_image', lambda path: None)
+    def unexpected_search(*args):
+        pytest.fail('Search must not run after failed model preflight')
+    monkeypatch.setattr('app.pipeline.search', unexpected_search)
+    _run_job(jid, provider=OfflineProvider(), skill=FakeSkill())
+    with session() as s:
+        j = s.get(Job, jid)
+        assert j.status == 'failed' and j.stage == '接口预检'
+        assert json.loads(j.checkpoint)['candidates'] == []
+
+
 def test_failed_visual_analysis_never_registers(monkeypatch):
     pid,jid=project_job()
     p=metadata();p['pdf_urls']=['https://example.com/paper.pdf']
