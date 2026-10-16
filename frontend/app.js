@@ -12,8 +12,23 @@ async function api(path,options={}){
   const headers = {Authorization:`Bearer ${state.token}`,...options.headers};
   if(options.body && !(options.body instanceof FormData)) headers['Content-Type']='application/json';
   const res=await fetch(state.base+path,{...options,headers});
-  if(!res.ok){let detail;try{detail=(await res.json()).detail;}catch{detail=`HTTP ${res.status}`;}if(res.status===401){state.token='';sessionStorage.removeItem('pw-token');}throw new Error(typeof detail==='string'?detail:JSON.stringify(detail));}
+  if(!res.ok){let detail;try{detail=(await res.json()).detail;}catch{detail=`HTTP ${res.status}`;}if(res.status===401){state.token='';sessionStorage.removeItem('pw-token');}throw new Error(apiErrorMessage(detail,res.status));}
   return options.binary?res.blob():res.json();
+}
+function apiErrorMessage(detail,status){
+  if(typeof detail==='string')return detail;
+  if(Array.isArray(detail)){
+    const names={text_model:'文本模型名称',vision_model:'视觉模型名称',api_key:'模型 API 密钥',base_url:'API 基础地址',count:'本批目标数量',name:'课题名称',password:'登录密码'};
+    return detail.map(e=>{const label=names[e.loc?.at(-1)]||'输入内容';return ['string_too_short','missing'].includes(e.type)?`请填写${label}`:`${label}格式不正确，请检查后重试`;}).join('；');
+  }
+  return `请求失败（HTTP ${status}），请稍后重试`;
+}
+function providerFormValues(){
+  for(const [id,label] of [['modelBase','API 基础地址'],['textModel','文本模型名称'],['visionModel','视觉模型名称']]){
+    if(!$(id).value.trim()){$(id).focus();throw new Error(`请填写${label}。模型名称请从 API 供应商的模型列表复制；密钥不会自动填入模型名称。`);}
+  }
+  if(!state.settings.has_api_key&&!$('apiKey').value.trim()){$('apiKey').focus();throw new Error('请填写模型 API 密钥。');}
+  return {base_url:$('modelBase').value.trim(),api_key:$('apiKey').value,text_model:$('textModel').value.trim(),vision_model:$('visionModel').value.trim(),openalex_key:$('alexKey').value};
 }
 function jsonBody(value){return JSON.stringify(value);}
 function showModal(title,body,wide=false){clearAssets();$('modal').classList.toggle('wide',wide);$('dialogLabel').textContent=title;$('modalBody').innerHTML=body;if(!$('modal').open)$('modal').showModal();}
@@ -123,8 +138,8 @@ function scopeForm(){
 }
 function settingsForm(){
   if(!requireService())return;const cfg=state.settings;
-  showModal('SETTINGS · 模型与连接',`<h2>模型与检索配置</h2><p>使用支持文本与图像的兼容接口。密钥加密保存在你的后端，不进入 Pages 或导出文件。</p>${field('API 基础地址（含 /v1）','modelBase',cfg.base_url||'https://api.openai.com/v1','url')}${field('模型 API 密钥','apiKey','','password',cfg.has_api_key?'已配置；留空保留原密钥':'请填写你的密钥')}${field('文本模型名称','textModel',cfg.text_model||'')}${field('视觉模型名称','visionModel',cfg.vision_model||'')}${field('OpenAlex API 密钥（可选）','alexKey','','password',cfg.has_openalex_key?'已配置；留空保留':'未配置时仅使用 Crossref')}<p id="formMessage"></p><div class="form-actions"><button class="outline" id="checkSetup">检查技能与图像能力</button><button class="primary" id="saveSettings">保存配置</button></div>`);
-  $('saveSettings').onclick=busy(async()=>{await api('/api/settings',{method:'PUT',body:jsonBody({base_url:$('modelBase').value.trim(),api_key:$('apiKey').value,text_model:$('textModel').value.trim(),vision_model:$('visionModel').value.trim(),openalex_key:$('alexKey').value})});state.settings=await api('/api/settings');$('apiKey').value='';$('alexKey').value='';$('formMessage').textContent='已保存。可检查接口能力；检查会产生少量 API 调用。';$('formMessage').className='success';});
+  showModal('SETTINGS · 模型与连接',`<h2>模型与检索配置</h2><p>使用支持文本与图像的兼容接口。密钥加密保存在你的后端，不进入 Pages 或导出文件。</p>${field('API 基础地址（含 /v1）','modelBase',cfg.base_url||'https://api.openai.com/v1','url')}${field('模型 API 密钥','apiKey','','password',cfg.has_api_key?'已配置；留空保留原密钥':'请填写你的密钥')}${field('文本模型名称（必填）','textModel',cfg.text_model||'','text','从供应商模型列表复制准确名称，API 密钥不会自动选择模型。')}${field('视觉模型名称（必填）','visionModel',cfg.vision_model||'','text','用于核对论文原图，必须支持图像输入；可与文本模型使用同一支持图像的模型。')}${field('OpenAlex API 密钥（可选）','alexKey','','password',cfg.has_openalex_key?'已配置；留空保留':'未配置时仅使用 Crossref')}<p id="formMessage"></p><div class="form-actions"><button class="outline" id="checkSetup">检查技能与图像能力</button><button class="primary" id="saveSettings">保存配置</button></div>`);
+  $('saveSettings').onclick=busy(async()=>{await api('/api/settings',{method:'PUT',body:jsonBody(providerFormValues())});state.settings=await api('/api/settings');$('apiKey').value='';$('alexKey').value='';$('formMessage').textContent='已保存。可检查接口能力；检查会产生少量 API 调用。';$('formMessage').className='success';});
   $('checkSetup').onclick=busy(async()=>{$('formMessage').textContent='正在检查外部技能和模型的实际图像读取能力…';await api('/api/preflight',{method:'POST'});$('formMessage').textContent='外部技能、文本和图像接口均通过检查。';$('formMessage').className='success';});
   const exit=document.createElement('button');exit.className='quiet';exit.textContent='退出私人空间';$('modalBody').querySelector('.form-actions').prepend(exit);exit.onclick=()=>{closeModal();$('logout').click();};
 }
