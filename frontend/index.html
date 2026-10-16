@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+  <meta name="description" content="从研究问题到可检验行动。按课题检索、精读并积累可追溯的论文证据。">
+  <title>研序 Paper Workbench · 学术文献研究看板</title>
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./vendor/Temml-Local.css">
+  <script defer src="./vendor/temml.min.js"></script>
+  <script type="module" src="./app.js"></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="./"><span class="brand-mark">研</span><span>研序<small>PAPER WORKBENCH</small></span></a>
+    <p class="side-caption">研究工作台</p>
+    <nav aria-label="工作区导航">
+      <button class="side-link active" data-nav="library"><span>▤</span>文献工作台</button>
+      <button class="side-link" data-nav="projects"><span>◫</span>我的课题库</button>
+      <button class="side-link" data-nav="jobs"><span>◷</span>分析批次<span id="jobDot"></span></button>
+    </nav>
+    <div class="side-divider"></div>
+    <p class="side-caption">当前课题</p>
+    <select id="projectSelect" aria-label="选择当前课题"><option>示例研究课题</option></select>
+    <button class="side-new" id="newProject">＋ 创建课题</button>
+    <div class="side-note"><span class="tiny-line"></span><strong>每个结论，都有来处。</strong><p>保留证据的边界，让下一步研究有据可循。</p></div>
+    <button class="side-link" id="settings"><span>⚙</span>连接与模型设置</button>
+    <div class="connection"><span id="connectionDot" class="dot"></span><span id="connectionLabel">独立示例演示</span><button id="logout" hidden>退出</button></div>
+  </aside>
+
+  <div class="shell">
+    <header class="topbar"><div><span class="breadcrumb">研究空间</span><span class="slash">/</span><span id="breadcrumbName">示例课题</span></div><div class="top-actions"><span class="pill" id="modePill">DEMO · 合成数据</span><button id="topSettings" aria-label="连接与模型设置">⚙</button><button class="quiet" id="help">使用说明 ↗</button></div></header>
+    <main id="main">
+      <section class="page-heading"><div><p class="eyebrow">READ WITH EVIDENCE. RESEARCH WITH INTENT.</p><h1>让阅读，走向下一步研究<span class="heading-dot">。</span></h1><p class="intro">找到值得读的论文，理清证据，形成可检验的研究行动。</p></div><button class="primary" id="newBatch">＋ 开始一批分析</button></section>
+      <div class="demo-notice" id="demoNotice"><span>◈</span><div><strong>你正在浏览合成示例</strong><span>以下内容用于展示产品结构，不对应真实论文，也不代表已完成精读。连接你自己的服务，即可开始研究。</span></div><button id="connect">连接服务 →</button></div>
+      <section class="topic-strip"><div><span class="topic-icon">⌘</span></div><div class="topic-content"><span class="eyebrow">当前研究课题</span><h2 id="topicTitle">城市绿地与热环境</h2><p id="topicGoal">探索研究问题、证据和方法之间的联系</p></div><button class="outline" id="editScope">查看研究范围 ↗</button></section>
+      <section class="stats" id="stats" aria-label="研究统计"></section>
+      <section id="workspace">
+        <div class="section-bar"><div><p class="eyebrow">YOUR GROWING RESEARCH LIBRARY</p><h2 id="sectionTitle">文献与研究行动</h2></div><div class="export-control"><label class="sr-only" for="exportKind">导出格式</label><select id="exportKind"><option value="html">离线 HTML</option><option value="markdown">Markdown</option><option value="json">JSON</option></select><button class="quiet" id="export">↓ 导出课题库</button></div></div>
+        <div class="tabbar" role="tablist" aria-label="文献视图"><button role="tab" aria-selected="true" class="tab active" data-view="latest">最近批次</button><button role="tab" aria-selected="false" class="tab" data-view="all">全部文献</button><button role="tab" aria-selected="false" class="tab" data-view="evidence">精读证据</button><button role="tab" aria-selected="false" class="tab" data-view="actions">研究行动</button></div>
+        <div class="filters"><label class="search"><span>⌕</span><input id="search" type="search" placeholder="搜索题目、DOI、关键词或研究方法…" aria-label="搜索文献"></label><select id="tagFilter" aria-label="筛选主题"><option value="">全部主题</option></select><input id="dateFilter" type="date" aria-label="筛选分析日期"><select id="priorityFilter" aria-label="筛选优先级"><option value="">全部优先级</option><option>P0</option><option>P1</option><option>P2</option><option>P3</option></select><select id="statusFilter" aria-label="筛选核验状态"><option value="">全部核验状态</option><option value="verified">已模型核验</option><option value="unverified">未核验</option></select></div>
+        <div class="results-line"><span id="resultCount"></span><span>研究计划均为待执行方案</span></div>
+        <div id="cards" class="paper-grid"></div>
+      </section>
+      <section id="alternate" hidden></section>
+      <footer><div class="footer-mark">研序 <span>Paper Workbench</span></div><span>可追溯的阅读 · 有边界的推断 · 可检验的行动</span></footer>
+    </main>
+  </div>
+  <dialog id="modal"><div class="dialog-top"><span class="eyebrow" id="dialogLabel">PAPER WORKBENCH</span><button class="icon-button" id="closeModal" aria-label="关闭对话框">×</button></div><div id="modalBody"></div></dialog>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>
