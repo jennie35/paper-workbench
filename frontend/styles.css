@@ -550,6 +550,31 @@ button[aria-busy="true"]:disabled, button.is-loading:disabled { opacity: .8; }
 .workflow-details { margin-bottom: 12px; }
 .workflow-details > summary { cursor: pointer; color: #6c805e; font-size: 12px; }
 .workflow-details .workflow-steps { margin-top: 12px; }
+.connection-tabs { display:flex; gap:6px; padding:5px; margin:17px 0; background:#eff3ea; border:1px solid var(--line); border-radius:8px; }
+.connection-tabs button { flex:1; padding:9px 10px; border-radius:5px; font-size:12px; color:#75836d; }
+.connection-tabs button.active { color:var(--green); background:#fff; font-weight:600; box-shadow:0 1px 5px #263e3610; }
+.model-picker { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+.model-picker select { min-width:120px; max-width:100%; flex:1; padding:8px; border:1px solid var(--line); border-radius:6px; background:white; color:var(--ink); }
+dialog.api-connect { max-width:760px; padding:16px 22px; }
+.api-connect .connection-tabs { margin:8px 0; }
+.api-connect h2 { margin:7px 0 5px; font-size:23px; }
+.api-connect p { margin:6px 0; font-size:12px; line-height:1.7; }
+.api-connect .callout { margin:8px 0; line-height:1.7; }
+.api-connect .field { margin:5px 0; }
+.api-connect .field small { font-size:10px; margin-top:3px; }
+.api-connect .field input, .api-connect .field select { padding:8px 10px; margin-top:4px; }
+#directConnectForm { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:0 16px; }
+#directConnectForm > * { grid-column:1/-1; }
+#directConnectForm > .field:has(#directKey), #directConnectForm > .field:has(#directModel) { grid-column:auto; }
+.api-connect .model-picker { margin:5px 0; }
+.api-connect .reader-meta { font-size:11px; margin:8px 0; }
+.api-connect .form-actions { margin:11px 0 0; }
+@media(max-width:600px){dialog.api-connect{padding:18px}#directConnectForm{grid-template-columns:minmax(0,1fr)}.api-connect .connection-tabs{margin:11px 0}.api-connect h2{font-size:21px}}
+.direct-notice { display:flex; align-items:center; gap:12px; padding:14px 17px; margin:0 0 24px; border:1px solid #d3dfcd; border-radius:8px; background:#f0f6eb; color:#5e7553; }
+.direct-notice strong { flex-shrink:0; font-size:12px; }
+.direct-notice span { flex:1; font-size:11px; line-height:1.8; }
+.direct-notice button { flex-shrink:0; font-size:12px; padding:6px 9px; }
+@media(max-width:800px){.direct-notice{flex-wrap:wrap;gap:6px}.direct-notice span{flex-basis:100%;order:3}.direct-notice button{margin-left:auto}.connection-tabs button{font-size:11px}}
 @media (max-width: 800px) {
   #projectSidebarNav { display: none; }
   .project-grid { grid-template-columns: minmax(0, 1fr); gap: 14px; }

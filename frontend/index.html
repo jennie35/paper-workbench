@@ -6,10 +6,10 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="description" content="从研究问题到可检验行动。按课题检索、精读并积累可追溯的论文证据。">
   <title>研序 Paper Workbench · 学术文献研究看板</title>
-  <link rel="stylesheet" href="./styles.css?v=20261017-projects">
+  <link rel="stylesheet" href="./styles.css?v=20261017-direct">
   <link rel="stylesheet" href="./vendor/Temml-Local.css">
   <script defer src="./vendor/temml.min.js"></script>
-  <script type="module" src="./app.js?v=20261017-projects"></script>
+  <script type="module" src="./app.js?v=20261017-direct"></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -36,7 +36,8 @@
     <header class="topbar"><div><span class="breadcrumb">研究空间</span><span class="slash">/</span><span id="breadcrumbName">示例课题</span></div><div class="top-actions"><span class="pill" id="modePill">DEMO · 合成数据</span><button class="quiet" id="refreshWorkspace" aria-label="刷新研究空间">刷新</button><button id="topSettings" aria-label="连接与模型设置">⚙</button><button class="quiet" id="help">使用说明 ↗</button></div></header>
     <main id="main">
       <section class="page-heading"><div><p class="eyebrow" id="pageEyebrow">YOUR RESEARCH PROJECTS</p><h1 id="pageTitle">从一个课题，开始研究。</h1><p class="intro" id="pageIntro">选择或创建课题，在课题内积累文献、分析结果与研究行动。</p></div><button class="primary" id="newBatch">＋ 创建课题</button></section>
-      <div class="demo-notice" id="demoNotice"><span>◈</span><div><strong>你正在浏览合成示例</strong><span>以下内容用于展示产品结构，不对应真实论文，也不代表已完成精读。连接你自己的服务，即可开始研究。</span></div><button id="connect">连接服务 →</button></div>
+      <div class="demo-notice" id="demoNotice"><span>◈</span><div><strong>你正在浏览合成示例</strong><span>示例不调用 API。连接模型 API 后，可在当前浏览器创建课题并检索文献。</span></div><button id="connect">连接 API →</button></div>
+      <div class="direct-notice" id="directNotice" hidden><strong>API 直连 · 浏览器课题库</strong><span>资料只保存在当前浏览器；Key 仅本页内存。当前支持摘要分析草稿，全文与原图尚未核验。运行时请保持此页打开。</span><button id="directSettings">配置 API</button></div>
       <section class="topic-strip" id="topicStrip" hidden><div><span class="topic-icon">⌘</span></div><div class="topic-content"><span class="eyebrow">当前研究课题</span><h2 id="topicTitle">城市绿地与热环境</h2><p id="topicGoal">探索研究问题、证据和方法之间的联系</p></div><div class="topic-actions"><button class="outline" id="editScope">查看研究范围</button><button class="quiet" id="switchProject">返回课题首页</button><button class="quiet" id="quickNewProject">＋ 新建</button></div></section>
       <nav class="project-tabs" id="projectTabs" aria-label="当前课题内容" hidden><button data-nav="library">文献与研究行动</button><button data-nav="jobs">分析批次与结果</button></nav>
       <section class="workflow-guide" id="workflowGuide" aria-label="研究操作引导" hidden></section>
