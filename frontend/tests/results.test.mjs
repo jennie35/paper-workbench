@@ -23,7 +23,7 @@ test('switching projects cannot apply an older project response to the current l
 
 test('a registered candidate opens the official record without downgrading it to a draft', async () => {
   const code=readFileSync(new URL('../app.js',import.meta.url),'utf8');
-  const fn=code.slice(code.indexOf('async function showCandidate('),code.indexOf('function connectionForm()'));
+  const fn=code.slice(code.indexOf('async function showCandidate('),code.indexOf('function connectionForm('));
   const opened=[];
   const state={papers:[{id:'R001'}],jobs:[{id:'batch',checkpoint:{candidates:[{paper_id:'R001'}]}}]};
   const context=vm.createContext({state,showPaper:id=>opened.push(id)});

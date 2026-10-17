@@ -11,6 +11,7 @@ export function summarizeBatch(job) {
   return {
     target: job.requested, complete, reused, total: candidates.length,
     missingFulltext: count('no_fulltext'), unverified: count('unverified'),
+    uploadedFulltext: candidates.filter(item => item.fulltext_uploaded && item.status === 'no_fulltext').length,
     excluded: count('excluded'), pending: count('pending'),
     shortfall: Math.max(0, job.requested - complete),
     active: activeStatuses.has(job.status),

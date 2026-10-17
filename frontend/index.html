@@ -6,19 +6,22 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="description" content="从研究问题到可检验行动。按课题检索、精读并积累可追溯的论文证据。">
   <title>研序 Paper Workbench · 学术文献研究看板</title>
-  <link rel="stylesheet" href="./styles.css?v=20261016-results">
+  <link rel="stylesheet" href="./styles.css?v=20261017-projects">
   <link rel="stylesheet" href="./vendor/Temml-Local.css">
   <script defer src="./vendor/temml.min.js"></script>
-  <script type="module" src="./app.js?v=20261016-results"></script>
+  <script type="module" src="./app.js?v=20261017-projects"></script>
 </head>
 <body>
   <aside class="sidebar">
     <a class="brand" href="./"><span class="brand-mark">研</span><span>研序<small>PAPER WORKBENCH</small></span></a>
     <p class="side-caption">研究工作台</p>
     <nav aria-label="工作区导航">
-      <button class="side-link active" data-nav="library"><span>▤</span>文献工作台</button>
-      <button class="side-link" data-nav="projects"><span>◫</span>我的课题库</button>
-      <button class="side-link" data-nav="jobs"><span>◷</span>分析批次<span id="jobDot"></span></button>
+      <button class="side-link active" data-nav="home"><span>◫</span>课题首页</button>
+      <div id="projectSidebarNav" hidden>
+        <p class="side-caption">课题内容</p>
+        <button class="side-link" data-nav="library"><span>▤</span>文献与研究行动</button>
+        <button class="side-link" data-nav="jobs"><span>◷</span>分析批次与结果<span id="jobDot"></span></button>
+      </div>
     </nav>
     <div class="side-divider"></div>
     <p class="side-caption">当前课题</p>
@@ -32,11 +35,13 @@
   <div class="shell">
     <header class="topbar"><div><span class="breadcrumb">研究空间</span><span class="slash">/</span><span id="breadcrumbName">示例课题</span></div><div class="top-actions"><span class="pill" id="modePill">DEMO · 合成数据</span><button class="quiet" id="refreshWorkspace" aria-label="刷新研究空间">刷新</button><button id="topSettings" aria-label="连接与模型设置">⚙</button><button class="quiet" id="help">使用说明 ↗</button></div></header>
     <main id="main">
-      <section class="page-heading"><div><p class="eyebrow">READ WITH EVIDENCE. RESEARCH WITH INTENT.</p><h1>让阅读，走向下一步研究<span class="heading-dot">。</span></h1><p class="intro">找到值得读的论文，理清证据，形成可检验的研究行动。</p></div><button class="primary" id="newBatch">＋ 开始检索与分析</button></section>
+      <section class="page-heading"><div><p class="eyebrow" id="pageEyebrow">YOUR RESEARCH PROJECTS</p><h1 id="pageTitle">从一个课题，开始研究。</h1><p class="intro" id="pageIntro">选择或创建课题，在课题内积累文献、分析结果与研究行动。</p></div><button class="primary" id="newBatch">＋ 创建课题</button></section>
       <div class="demo-notice" id="demoNotice"><span>◈</span><div><strong>你正在浏览合成示例</strong><span>以下内容用于展示产品结构，不对应真实论文，也不代表已完成精读。连接你自己的服务，即可开始研究。</span></div><button id="connect">连接服务 →</button></div>
-      <section class="topic-strip"><div><span class="topic-icon">⌘</span></div><div class="topic-content"><span class="eyebrow">当前研究课题</span><h2 id="topicTitle">城市绿地与热环境</h2><p id="topicGoal">探索研究问题、证据和方法之间的联系</p></div><button class="outline" id="editScope">查看研究范围 ↗</button></section>
-      <section class="stats" id="stats" aria-label="研究统计"></section>
-      <section id="workspace">
+      <section class="topic-strip" id="topicStrip" hidden><div><span class="topic-icon">⌘</span></div><div class="topic-content"><span class="eyebrow">当前研究课题</span><h2 id="topicTitle">城市绿地与热环境</h2><p id="topicGoal">探索研究问题、证据和方法之间的联系</p></div><div class="topic-actions"><button class="outline" id="editScope">查看研究范围</button><button class="quiet" id="switchProject">返回课题首页</button><button class="quiet" id="quickNewProject">＋ 新建</button></div></section>
+      <nav class="project-tabs" id="projectTabs" aria-label="当前课题内容" hidden><button data-nav="library">文献与研究行动</button><button data-nav="jobs">分析批次与结果</button></nav>
+      <section class="workflow-guide" id="workflowGuide" aria-label="研究操作引导" hidden></section>
+      <section class="stats" id="stats" aria-label="研究统计" hidden></section>
+      <section id="workspace" hidden>
         <section id="batchSummary" class="batch-summary" aria-label="当前批次结果" hidden></section>
         <div class="section-bar"><div><p class="eyebrow">YOUR GROWING RESEARCH LIBRARY</p><h2 id="sectionTitle">文献与研究行动</h2></div><div class="export-control"><label class="sr-only" for="exportKind">导出格式</label><select id="exportKind"><option value="html">离线 HTML</option><option value="markdown">Markdown</option><option value="json">JSON</option></select><button class="quiet" id="export">↓ 导出课题库</button></div></div>
         <div class="tabbar" role="tablist" aria-label="文献视图"><button role="tab" aria-selected="true" class="tab active" data-view="latest">最近批次</button><button role="tab" aria-selected="false" class="tab" data-view="all">全部文献</button><button role="tab" aria-selected="false" class="tab" data-view="evidence">精读证据</button><button role="tab" aria-selected="false" class="tab" data-view="actions">研究行动</button></div>

@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 import io
 import json
 import os
@@ -10,6 +11,7 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 from functools import wraps
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -108,45 +110,127 @@ def login(payload: Login, request: Request):
     return {'token': issue_token(), 'expires_in': 43200}
 
 
+_provider_lock = threading.RLock()
+
+
+def provider_fingerprint(cfg):
+    """Private comparison token: never include keys or this token in API results."""
+    value = json.dumps(cfg, sort_keys=True, separators=(',', ':')).encode()
+    return hmac.new(encryption()._signing_key, value, hashlib.sha256).hexdigest()
+
+
+def stored_configuration(s):
+    row = s.get(Setting, 'provider')
+    return json.loads(encryption().decrypt(row.value.encode())) if row else None
+
+
+def preflight_record(s):
+    row = s.get(Setting, 'provider_preflight')
+    if not row:
+        return {}
+    try:
+        return json.loads(row.value)
+    except (ValueError, TypeError):
+        return {}
+
+
+def preflight_view(s, cfg):
+    record = preflight_record(s)
+    if not cfg or record.get('fingerprint') != provider_fingerprint(cfg):
+        return {'ready': False, 'checked_at': None}
+    return {'ready': record.get('ready') is True, 'checked_at': record.get('checked_at')}
+
+
 @app.get('/api/settings', dependencies=[Depends(auth)])
 def get_settings():
-    try:
-        cfg = configuration()
-    except ValueError:
-        return {'configured': False}
-    return {'configured': True, 'base_url': cfg['base_url'], 'text_model': cfg['text_model'], 'vision_model': cfg['vision_model'], 'has_api_key': bool(cfg.get('api_key')), 'has_openalex_key': bool(cfg.get('openalex_key'))}
+    with _provider_lock, session() as s:
+        cfg = stored_configuration(s)
+        status = preflight_view(s, cfg)
+    if not cfg:
+        return {'configured': False, 'preflight': status}
+    return {'configured': True, 'base_url': cfg['base_url'], 'text_model': cfg['text_model'], 'vision_model': cfg['vision_model'], 'has_api_key': bool(cfg.get('api_key')), 'has_openalex_key': bool(cfg.get('openalex_key')), 'preflight': status}
 
 
 @app.put('/api/settings', dependencies=[Depends(auth)])
 def save_settings(payload: ProviderInput):
-    public_url(payload.base_url)
-    try:
-        old = configuration()
-    except ValueError:
-        old = {}
     cfg = payload.model_dump()
-    for key in ('api_key', 'openalex_key'):
+    cfg['base_url'] = cfg['base_url'].strip().rstrip('/')
+    public_url(cfg['base_url'])
+    for key, label in (('text_model', '文本模型名称'), ('vision_model', '视觉模型名称')):
+        cfg[key] = cfg[key].strip()
         if not cfg[key]:
-            cfg[key] = old.get(key, '')
-    if not cfg['api_key']:
-        raise ValueError('请填写 API 密钥')
-    with session() as s:
+            raise ValueError('请填写' + label)
+    with _provider_lock, session() as s:
+        old = stored_configuration(s) or {}
+        if old and not cfg['api_key']:
+            def origin(value):
+                parsed = urlsplit(value)
+                return parsed.scheme.lower(), (parsed.hostname or '').lower(), parsed.port or 443
+            if origin(cfg['base_url']) != origin(old['base_url']):
+                raise ValueError('API 服务地址已切换到其他供应商，请填写对应的新 API 密钥；原密钥不会发送到新地址')
+        for key in ('api_key', 'openalex_key'):
+            if not cfg[key]:
+                cfg[key] = old.get(key, '')
+        if not cfg['api_key']:
+            raise ValueError('请填写 API 密钥')
+        changed = provider_fingerprint(cfg) != provider_fingerprint(old)
         row = s.get(Setting, 'provider')
         encrypted = encryption().encrypt(json.dumps(cfg).encode()).decode()
         if row:
             row.value = encrypted
         else:
             s.add(Setting(key='provider', value=encrypted))
+        if changed:
+            check = s.get(Setting, 'provider_preflight')
+            if check:
+                s.delete(check)
     return {'saved': True}
+
+
+def finish_preflight(fingerprint, attempt, ready):
+    """A late check must never certify a different configuration or newer check."""
+    with _provider_lock, session() as s:
+        cfg = stored_configuration(s)
+        record = preflight_record(s)
+        if not cfg or provider_fingerprint(cfg) != fingerprint or record.get('attempt') != attempt:
+            return False
+        record.update(ready=ready, checked_at=now())
+        s.get(Setting, 'provider_preflight').value = json.dumps(record)
+        return True
 
 
 @app.post('/api/preflight', dependencies=[Depends(auth)])
 def preflight():
-    skill = Skill()
-    skill_status = skill.preflight()
-    provider = Provider(configuration())
-    provider.preflight(challenge_image(DATA / 'probe'))
+    with _provider_lock, session() as s:
+        cfg = stored_configuration(s)
+        if not cfg:
+            raise ValueError('请先保存模型配置')
+        fingerprint, attempt = provider_fingerprint(cfg), str(uuid.uuid4())
+        record = json.dumps({'fingerprint': fingerprint, 'attempt': attempt, 'ready': False, 'checked_at': None})
+        row = s.get(Setting, 'provider_preflight')
+        if row:
+            row.value = record
+        else:
+            s.add(Setting(key='provider_preflight', value=record))
+    try:
+        skill_status = Skill().preflight()
+        Provider(cfg).preflight(challenge_image(DATA / 'probe'))
+    except Exception:
+        finish_preflight(fingerprint, attempt, False)
+        raise
+    if not finish_preflight(fingerprint, attempt, True):
+        raise HTTPException(409, '检查期间配置已更改或已启动新的检查，请重新检查当前配置')
     return {'ready': True, 'skill': skill_status, 'text': True, 'vision': True}
+
+
+@app.get('/api/workspace/status', dependencies=[Depends(auth)])
+def workspace_status():
+    with session() as s:
+        for job in s.scalars(select(Job).where(Job.status.in_(['queued', 'running'])).order_by(Job.created_at)).all():
+            reconcile_job(job)
+            if job.status in ('queued', 'running'):
+                return {'active_job': {'id': job.id, 'project_id': job.project_id, 'stage': job.stage, 'status': job.status}}
+    return {'active_job': None}
 
 
 def project_dict(p):
@@ -211,8 +295,23 @@ async def upload_reference(pid: str, file: UploadFile = File(...)):
     texts = await save_upload(file, path)
     fingerprint = hashlib.sha256(path.read_bytes()).hexdigest()
     with session() as s:
+        # Serialize uploads to this project so a retry cannot duplicate a reference.
+        s.execute(select(Project).where(Project.id == pid).with_for_update()).scalar_one()
+        existing = s.scalar(select(Reference).where(Reference.project_id == pid, Reference.sha256 == fingerprint))
+        if existing:
+            path.unlink(missing_ok=True)
+            folder.rmdir()
+            return {'id': existing.id, 'pages': len(texts), 'sha256': fingerprint, 'role': '研究范围参考，不占精读额度', 'reused': True}
         s.add(Reference(id=rid, project_id=pid, filename=(file.filename or 'reference.pdf')[:300], sha256=fingerprint, text=json.dumps(texts, ensure_ascii=False)))
     return {'id': rid, 'pages': len(texts), 'sha256': fingerprint, 'role': '研究范围参考，不占精读额度'}
+
+
+@app.get('/api/projects/{pid}/references', dependencies=[Depends(auth)])
+def project_references(pid: str):
+    with session() as s:
+        get_project(s, pid)
+        rows = s.scalars(select(Reference).where(Reference.project_id == pid)).all()
+        return [{'id': row.id, 'filename': row.filename, 'pages': len(json.loads(row.text)), 'sha256': row.sha256, 'role': '研究范围参考，不占精读额度'} for row in rows]
 
 
 @app.post('/api/projects/{pid}/infer-scope', dependencies=[Depends(auth)])
@@ -532,20 +631,45 @@ async def supply_fulltext(jid: str, index: int, file: UploadFile = File(...)):
         folder = candidate_folder(c, scope)
         folder.mkdir(parents=True, exist_ok=True)
     # Upload to staging; rejected replacement must not destroy a valid cached source.
-    staged = folder / 'uploaded.pdf'
-    await save_upload(file, staged)
-    old = folder / 'paper.pdf'
-    if old.exists() and hashlib.sha256(old.read_bytes()).digest() != hashlib.sha256(staged.read_bytes()).digest():
-        # Keep historical evidence intact; new source gets a fresh analysis directory after cleanup.
-        import shutil
-        archive = folder / ('revision-' + str(uuid.uuid4()))
-        archive.mkdir()
-        for name in ['source', 'assets', 'source-fingerprint.json', 'text-checkpoints.json', 'visual-checkpoints.json', 'draft.json', 'provisional.json', 'reading-note.md', 'analysis.json', 'evidence.json']:
-            p = folder / name
-            if p.exists():
-                shutil.move(str(p), str(archive / name))
-    staged.replace(old)
-    return {'uploaded': True, 'notice': '正文身份将在重试分析时核对'}
+    staged = folder / ('upload-' + str(uuid.uuid4()) + '.pdf')
+    filename = re.split(r'[/\\]', file.filename or 'paper.pdf')[-1]
+    filename = re.sub(r'[\x00-\x1f\x7f]', '', filename)[:300] or 'paper.pdf'
+    try:
+        await save_upload(file, staged)
+        # Upload parsing can yield while another browser resumes a task. Recheck
+        # after that await and serialize the final file swap with job admission.
+        with _admission_lock, session() as s:
+            s.execute(select(Setting).where(Setting.key == 'ledger_counter').with_for_update()).scalar_one()
+            j = s.get(Job, jid)
+            if not j:
+                raise HTTPException(404, '任务不存在')
+            if s.scalar(select(Job).where(Job.status.in_(['queued', 'running']))):
+                raise HTTPException(409, '已有批次开始执行，尚未替换正文；请等任务结束后重新上传')
+            latest = json.loads(j.checkpoint)
+            if index < 0 or index >= len(latest.get('candidates', [])):
+                raise HTTPException(409, '候选记录已变化，请刷新后重新上传')
+            candidate = latest['candidates'][index]
+            current_scope = latest.get('scope_snapshot') or json.loads(get_project(s, j.project_id).scope)
+            if candidate['status'] in ('completed', 'duplicate', 'excluded') or candidate_folder(candidate, current_scope).resolve() != folder.resolve():
+                raise HTTPException(409, '候选记录已变化，请刷新后重新上传')
+            old = folder / 'paper.pdf'
+            if old.exists() and hashlib.sha256(old.read_bytes()).digest() != hashlib.sha256(staged.read_bytes()).digest():
+                # Keep historical evidence intact; a new source receives fresh analysis.
+                import shutil
+                archive = folder / ('revision-' + str(uuid.uuid4()))
+                archive.mkdir()
+                for name in ['source', 'assets', 'source-fingerprint.json', 'text-checkpoints.json', 'visual-checkpoints.json', 'draft.json', 'provisional.json', 'reading-note.md', 'analysis.json', 'evidence.json']:
+                    p = folder / name
+                    if p.exists():
+                        shutil.move(str(p), str(archive / name))
+            staged.replace(old)
+            feedback = {'fulltext_uploaded': True, 'uploaded_filename': filename, 'fulltext_uploaded_at': now()}
+            candidate.update(feedback)
+            j.checkpoint = json.dumps(latest, ensure_ascii=False)
+            j.updated_at = now()
+        return {'uploaded': True, **feedback, 'notice': '全文已保存，等待继续整个批次；正文身份将在重试分析时核对，不代表已完成核验'}
+    finally:
+        staged.unlink(missing_ok=True)
 
 
 def papers_for(pid=None):
