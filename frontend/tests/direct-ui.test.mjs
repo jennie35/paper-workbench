@@ -49,8 +49,9 @@ test('direct settings opened from home stays in API settings and forwards contin
 });
 
 function readerContext(){
-  const state={mode:'direct',demo:false,view:'latest',papers:[]},display=[],assets=[];
+  const state={mode:'direct',demo:false,view:'latest',papers:[],jobs:[]},display=[],assets=[];
   const exportButton={addEventListener(){}},context=vm.createContext({state,esc,watermark:'Analysis performed using the norman-paper-reading skill | APPLIED-SIGNATURE',badge:label=>`<span>${esc(label)}</span>`,publicationLink:()=>'',tags:()=>[],showModal:(title,body)=>display.push({title,body}),renderMath(){},loadReaderAssets:async path=>assets.push(path),$:id=>id==='exportCandidate'?exportButton:null});
+  vm.runInContext(extract('function reportLabel(','function badge('),context);
   vm.runInContext(extract('function section(','function renderMath('),context);
   vm.runInContext(extract('async function showPaper(','async function showCandidate('),context);
   return {state,context,display,assets};
@@ -59,7 +60,7 @@ function paper(){return {id:'D001',title:'Synthetic abstract-only research',doi:
 
 test('direct draft reader discloses missing full text without claiming Norman was applied',()=>{
   const {context}=readerContext(),markup=context.readingBody(paper(),{draft:true});
-  assert.match(markup,/分析草稿 · 未核验/);assert.match(markup,/未执行 norman-paper-reading 外部技能/);assert.match(markup,/不计入完整精读/);
+  assert.match(markup,/摘要研究报告/);assert.match(markup,/未执行 norman-paper-reading 外部技能/);assert.match(markup,/报告依据与阅读边界/);assert.match(markup,/未取得全文/);
   assert.doesNotMatch(markup,/APPLIED-SIGNATURE|Analysis performed using|分析采用 norman-paper-reading 技能|>已模型核验<|>已完成精读</);
   assert.doesNotMatch(markup,/下载已获取的全文 PDF/);
 });
@@ -67,16 +68,16 @@ test('direct draft reader discloses missing full text without claiming Norman wa
 test('opening a D-number record always uses draft reading even if a stale verified flag is present',async()=>{
   const {state,context,display}=readerContext(),draft=paper();draft.analysis.verified=true;state.papers=[draft];
   await context.showPaper('D001');
-  assert.equal(display.length,1);assert.match(display[0].body,/分析草稿 · 未核验/);assert.match(display[0].body,/全文、原图及公式未核验/);
+  assert.equal(display.length,1);assert.match(display[0].body,/摘要研究报告/);assert.match(display[0].body,/原图及公式未视觉核验/);assert.match(display[0].body,/未取得全文/);
   assert.doesNotMatch(display[0].body,/APPLIED-SIGNATURE|Analysis performed using|分析采用 norman-paper-reading 技能|>已模型核验<|>已完成精读</);
   assert.equal(state.papers[0].id,'D001');
 });
 
-test('D-number paper cards lead to an abstract draft rather than presenting full reading as completed',()=>{
+test('D-number paper cards lead to an honestly labelled report without claiming visual verification',()=>{
   const {context}=readerContext();
   vm.runInContext(extract('function paperCard(','function section('),context);
   const markup=context.paperCard(paper());
-  assert.match(markup,/D001/);assert.match(markup,/未核验/);assert.match(markup,/阅读摘要草稿/);
+  assert.match(markup,/D001/);assert.match(markup,/待核验/);assert.match(markup,/摘要研究报告/);assert.match(markup,/阅读报告/);
   assert.doesNotMatch(markup,/进入精读与研究规划|>已模型核验<|>已完成精读</);
 });
 

@@ -36,10 +36,10 @@ export function workflowState({demo = true, project = null, settings = null, act
       ? '配置完整，最近一次能力检查已通过；分析开始时会自动复查。'
       : '配置完整；分析开始时自动检查文本、图像和阅读技能，无需另做付费检查。';
   }
-  if(direct)modelDescription=hasModels?'文本模型已配置；确认启动后分析摘要，全文和原图仍未核验。':'填写 API 地址、Key 与文本模型名，Key 仅保留在本页内存。';
+  if(direct)modelDescription=hasModels?'文本模型已配置；启动后生成基于实际全文文字或摘要的报告。':'填写 API 地址、Key 与文本模型名，Key 仅保留在本页内存。';
   const steps = [
     {key:'connection', label:direct?'浏览器课题库':'连接研究空间', complete:connected,
-      description:connected ? direct?'课题和草稿保存在当前浏览器，不会同步至私人后台。':'已进入私人研究空间，资料保存在此服务。' : '可直接填写模型 API，或选择高级私人后台模式。'},
+      description:connected ? direct?'课题和报告保存在当前浏览器。':'已进入私人研究空间，资料保存在此服务。' : '可直接填写模型 API，或选择高级私人后台模式。'},
     {key:'project', label:'创建或选择课题', complete:hasProject,
       description:hasProject ? `当前课题：${project.name || '未命名课题'}` : '输入课题名称，可选上传参考 PDF。'},
     {key:'scope', label:'确认研究范围', complete:hasScope,
@@ -54,7 +54,7 @@ export function workflowState({demo = true, project = null, settings = null, act
   } else if (!connected) {
     action = 'connect';
     title = '连接你的研究空间';
-    description = '当前为示例演示。填写模型 API 后可在浏览器中检索文献并保存摘要草稿。';
+    description = '当前为示例演示。填写模型 API 后可在浏览器中检索文献并生成报告。';
   } else if (!hasProject) {
     action = 'create';
     title = '创建第一个课题';
@@ -70,7 +70,7 @@ export function workflowState({demo = true, project = null, settings = null, act
   } else {
     action = 'batch';
     title = '开始检索与分析';
-    description = direct?'确认篇数与发送资料后生成摘要草稿，运行时保持本页打开。':'研究范围和模型已配置。下一步确认篇数与资料发送范围，再启动任务。';
+    description = direct?'确认篇数与发送资料后生成文献报告，运行时保持本页打开。':'研究范围和模型已配置。下一步确认篇数与资料发送范围，再启动任务。';
   }
   return {action, title, description, steps};
 }

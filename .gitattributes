@@ -10,3 +10,13 @@ Dockerfile text eol=lf
 frontend/vendor/* -whitespace
 *.jpg binary
 *.woff2 binary
+
+# Preserve PDF offsets and packaged binary resources on Windows checkouts.
+*.pdf binary
+*.bcmap binary
+*.pfb binary
+*.ttf binary
+
+# Keep upstream license formatting and shipped module line endings intact.
+frontend/vendor/pdfjs/** -whitespace
+frontend/vendor/pdfjs/legacy/build/*.mjs text eol=lf

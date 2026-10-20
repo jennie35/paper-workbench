@@ -16,15 +16,15 @@ function renderContext(nav='home',project={id:'A',name:'Topic A'}){
 
 test('home hides all project results even when private papers and batches are already loaded',()=>{
   const {context,$,calls}=renderContext();context.render();
-  for(const id of ['topicStrip','projectTabs','projectSidebarNav','workflowGuide','stats','workspace','batchSummary','candidatePanel'])assert.equal($(id).hidden,true,id);
+  for(const id of ['topicStrip','projectSidebarNav','workflowGuide','stats','workspace','batchSummary','candidatePanel'])assert.equal($(id).hidden,true,id);
   assert.deepEqual(calls,['home']);assert.equal($('newBatch').textContent,'＋ 创建课题');assert.equal($('breadcrumbName').textContent,'课题首页');
 });
 
 test('project results and batches stay within the opened project and disappear on returning home',()=>{
   const {context,state,$,calls}=renderContext('library');context.render();
-  assert.equal($('workspace').hidden,false);assert.equal($('projectTabs').hidden,false);assert.equal($('breadcrumbName').textContent,'Topic A');assert.ok(calls.includes('papers'));
-  state.nav='jobs';context.render();assert.equal($('workspace').hidden,true);assert.equal($('alternate').hidden,false);assert.equal($('workflowGuide').hidden,true);assert.equal($('stats').hidden,true);assert.equal(calls.at(-1),'jobs');
-  state.nav='home';context.render();assert.equal($('projectTabs').hidden,true);assert.equal($('stats').hidden,true);assert.equal(calls.at(-1),'home');
+  assert.equal($('workspace').hidden,false);assert.equal($('breadcrumbName').textContent,'Topic A');assert.ok(calls.includes('papers'));
+  state.nav='jobs';context.render();assert.equal(state.nav,'library');assert.equal($('workspace').hidden,false);assert.equal($('alternate').hidden,true);assert.equal($('stats').hidden,true);assert.equal(calls.at(-1),'papers');
+  state.nav='home';context.render();assert.equal($('projectSidebarNav').hidden,true);assert.equal($('stats').hidden,true);assert.equal(calls.at(-1),'home');
 });
 
 test('a missing project cannot expose batch or library views',()=>{
@@ -45,10 +45,12 @@ test('opening a project fetches only that project and enters its content',async(
   assert.equal(closed,1);
 });
 
-test('switching projects hides stale batch actions while the new project loads',()=>{
-  const output={innerHTML:''},context=vm.createContext({state:{projectLoading:true,jobs:[{id:'A-job'}]},$:()=>output});
-  vm.runInContext(extract('function renderJobs(){','function download('),context);context.renderJobs();
-  assert.match(output.innerHTML,/正在读取课题批次/);assert.doesNotMatch(output.innerHTML,/data-retry|data-results|A-job/);
+test('switching projects hides stale report and candidate actions while the new project loads',()=>{
+  const fields=new Map(),$=id=>{if(!fields.has(id))fields.set(id,{});return fields.get(id);};
+  const context=vm.createContext({state:{projectLoading:true,papers:[],jobs:[{id:'A-job'}]},$});
+  vm.runInContext(extract('function renderPapers(){','function clearFilters('),context);context.renderPapers();
+  assert.equal($('batchSummary').hidden,true);assert.equal($('candidatePanel').hidden,true);
+  assert.match($('cards').innerHTML,/正在读取文献与批次/);assert.doesNotMatch($('cards').innerHTML,/data-retry|data-results|A-job/);
 });
 
 test('returning home cancels pending navigation so a late project response cannot reopen results',async()=>{

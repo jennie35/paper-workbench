@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shutil
 import threading
 import time
 import uuid
@@ -19,7 +20,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from redis import Redis
 from rq import Queue, Retry
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from .config import DATA, REDIS_URL, ALLOWED_ORIGINS, MAX_BYTES, TASK_BACKEND
 from .db import init_db, session, Project, Reference, Job, Paper, Setting, ProjectPaper, now
@@ -57,7 +58,7 @@ async def lifespan(app):
 
 
 app = FastAPI(title='Paper Workbench API', version='0.1.0', lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credentials=False, allow_methods=['GET', 'POST', 'PUT'], allow_headers=['Authorization', 'Content-Type'])
+app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credentials=False, allow_methods=['GET', 'POST', 'PUT', 'DELETE'], allow_headers=['Authorization', 'Content-Type'])
 bearer = HTTPBearer(auto_error=False)
 
 
@@ -284,6 +285,21 @@ async def save_upload(file: UploadFile, path):
         await file.close()
 
 
+def remove_reference_folder(rid):
+    """Delete only this reference's direct, non-linked storage directory."""
+    # Never turn a damaged database id or filesystem link into a broader deletion.
+    if not re.fullmatch(r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', rid):
+        raise ValueError('参考资料存储编号无效')
+    root = DATA.resolve() / 'references'
+    folder = root / rid
+    # Resolving the root first would silently authorize a replaced references
+    # directory pointing outside DATA. Both directory levels must stay direct.
+    if root.resolve() != root or folder.resolve() != folder or folder.parent != root:
+        raise ValueError('参考资料存储路径无效')
+    if folder.exists():
+        shutil.rmtree(folder)
+
+
 @app.post('/api/projects/{pid}/references', dependencies=[Depends(auth)])
 async def upload_reference(pid: str, file: UploadFile = File(...)):
     with session() as s:
@@ -292,18 +308,25 @@ async def upload_reference(pid: str, file: UploadFile = File(...)):
     folder = DATA / 'references' / rid
     folder.mkdir(parents=True)
     path = folder / 'reference.pdf'
-    texts = await save_upload(file, path)
-    fingerprint = hashlib.sha256(path.read_bytes()).hexdigest()
-    with session() as s:
-        # Serialize uploads to this project so a retry cannot duplicate a reference.
-        s.execute(select(Project).where(Project.id == pid).with_for_update()).scalar_one()
-        existing = s.scalar(select(Reference).where(Reference.project_id == pid, Reference.sha256 == fingerprint))
-        if existing:
-            path.unlink(missing_ok=True)
-            folder.rmdir()
-            return {'id': existing.id, 'pages': len(texts), 'sha256': fingerprint, 'role': '研究范围参考，不占精读额度', 'reused': True}
-        s.add(Reference(id=rid, project_id=pid, filename=(file.filename or 'reference.pdf')[:300], sha256=fingerprint, text=json.dumps(texts, ensure_ascii=False)))
-    return {'id': rid, 'pages': len(texts), 'sha256': fingerprint, 'role': '研究范围参考，不占精读额度'}
+    registered = False
+    try:
+        texts = await save_upload(file, path)
+        fingerprint = hashlib.sha256(path.read_bytes()).hexdigest()
+        with _admission_lock, session() as s:
+            # Parsing yields to other requests; deletion may have finished meanwhile.
+            # This project row also serializes upload/deletion across API processes.
+            project = s.scalar(select(Project).where(Project.id == pid).with_for_update())
+            if not project:
+                raise HTTPException(404, '课题已删除；参考资料未保存')
+            existing = s.scalar(select(Reference).where(Reference.project_id == pid, Reference.sha256 == fingerprint))
+            if existing:
+                return {'id': existing.id, 'pages': len(texts), 'sha256': fingerprint, 'role': '研究范围参考，不占精读额度', 'reused': True}
+            s.add(Reference(id=rid, project_id=pid, filename=(file.filename or 'reference.pdf')[:300], sha256=fingerprint, text=json.dumps(texts, ensure_ascii=False)))
+        registered = True
+        return {'id': rid, 'pages': len(texts), 'sha256': fingerprint, 'role': '研究范围参考，不占精读额度'}
+    finally:
+        if not registered:
+            remove_reference_folder(rid)
 
 
 @app.get('/api/projects/{pid}/references', dependencies=[Depends(auth)])
@@ -407,6 +430,40 @@ def start_job(pid: str, payload: BatchInput):
             j.status, j.error = 'failed', '任务队列不可用，检查 Redis 和 worker 后重试'
         raise HTTPException(503, '任务队列不可用；已保留可重试批次')
     return {'id': jid, 'status': 'queued'}
+
+
+@app.delete('/api/projects/{pid}', dependencies=[Depends(auth)])
+@serialized_admission
+def delete_project(pid: str):
+    """Remove project-owned records; retain the global ledger and shared evidence."""
+    with session() as s:
+        # Use the same database lock/order as task admission and ledger commits.
+        # An explicit cancellation request is not enough: the worker must stop first.
+        s.execute(select(Setting).where(Setting.key == 'ledger_counter').with_for_update()).scalar_one()
+        project = s.scalar(select(Project).where(Project.id == pid).with_for_update())
+        if not project:
+            raise HTTPException(404, '课题不存在')
+        if s.scalar(select(Job).where(Job.project_id == pid, Job.status.in_(['queued', 'running']))):
+            raise HTTPException(409, '该课题仍有分析任务，请先取消并等待任务停止后再删除')
+        reference_ids = list(s.scalars(select(Reference.id).where(Reference.project_id == pid)).all())
+        s.execute(delete(ProjectPaper).where(ProjectPaper.project_id == pid))
+        s.execute(delete(Job).where(Job.project_id == pid))
+        s.execute(delete(Reference).where(Reference.project_id == pid))
+        s.delete(project)
+    # Commit first: a failed transaction must leave the original reference files
+    # intact. A cleanup error cannot roll back committed records; report it plainly.
+    cleanup_pending = []
+    for rid in reference_ids:
+        try:
+            remove_reference_folder(rid)
+        except (OSError, ValueError):
+            cleanup_pending.append(rid)
+    return {
+        'deleted': True, 'id': pid, 'preserved_ledger': True,
+        'cleanup_pending': cleanup_pending,
+        'notice': '课题、批次和范围参考已删除；实例主台账、连续编号及可复用论文证据保留。'
+        + (' 部分参考文件清理失败，请部署者检查存储目录。' if cleanup_pending else ''),
+    }
 
 
 def job_dict(j):

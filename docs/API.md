@@ -11,6 +11,7 @@
 | `POST /api/preflight` | 实际检查外部技能、原生工具与文本/图像能力并登记当前配置的就绪状态；会调用模型 |
 | `GET /api/workspace/status` | 返回 `active_job:null` 或 `{id,project_id,stage,status}`，用于定位实例内唯一运行批次 |
 | `GET, POST /api/projects` | 课题列表；创建 `{name,goal}` |
+| `DELETE /api/projects/{id}` | 删除课题、批次、范围参考和论文关联；活动任务返回 409。保留实例主台账与连续编号；`cleanup_pending` 报告未清理的参考文件 |
 | `PUT /api/projects/{id}/scope` | 保存科学问题、关键词、纳入与排除范围及推定状态 |
 | `GET /api/projects/{id}/references` | 参考资料元数据列表：`id,filename,pages,sha256,role`；不含正文或服务器路径 |
 | `POST /api/projects/{id}/references` | multipart `file` 上传范围参考 PDF；同课题相同文件指纹复用记录并返回 `reused:true` |
@@ -31,6 +32,8 @@
 | `GET /api/projects/{id}/export?kind=html` | 导出 zip；另支持 `markdown` 和 `json` |
 
 ## 数据约定
+
+以上表格描述私人后台。静态在线模式由浏览器适配器执行同名操作，使用本机 IndexedDB 而不调用私人后台：报告编号为 `D001` 等，`verified` 始终为 false。`analysis.source_basis` 区分 `fulltext`（实际提取的 PDF 文字）和 `abstract`，`source_blocks`、`source_metadata`、`coverage` 保存实际发送的来源和读取范围。浏览器另支持 `GET /api/papers/{id}/source` 读取已保存来源文字。批次的 `reports_generated`、`fulltext_reports`、`abstract_reports`、`report_shortfall` 描述新增报告，复用论文不计新增；它们不代表完整精读或原图核验。在线删除同样保留共享台账和编号，但没有服务器文件清理字段。
 
 一个实例只有一个管理员。课题间共用论文身份和连续编号，通过课题关联保存适用性说明。`R001` 等为显示编号，数据库以整数和事务计数器保存，不用列表长度计算。
 

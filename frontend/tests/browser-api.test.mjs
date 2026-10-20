@@ -26,6 +26,8 @@ function mockFetch(items,{failAnalysis=0,analysisGate=null}={}){
   const fetchImpl=async(url,options={})=>{
     calls.push({url:String(url),options});
     if(String(url).startsWith('https://api.crossref.org/works'))return response({message:{items}});
+    if(String(url).startsWith('https://api.openalex.org/works/'))return response({},404);
+    if(String(url).startsWith('https://api.openalex.org/works'))return response({results:[]});
     if(String(url).endsWith('/models'))return response({data:[{id:'fixture-text'},{id:'fixture-text'},{id:'fixture-other'}]});
     const body=JSON.parse(options.body),system=body.messages[0].content,input=JSON.parse(body.messages[1].content);
     if(system.includes('实质相关性筛选'))return modelAnswer({selected:input.candidates.map((_,index)=>({index,reason:'This fixture directly addresses the specified research question.',score:0.95})),excluded:[]});
@@ -71,13 +73,13 @@ test('actual abstracts produce unverified drafts, never completed full readings,
   const records=await api.handle(`/api/projects/${project.id}/papers`);assert.equal(records.length,1);assert.equal(records[0].id,'D001');const a=records[0].analysis;assert.equal(a.verified,false);assert.equal(a.skill_applied,false);assert.deepEqual(a.visuals,[]);assert.deepEqual(a.evidence[0].source_block_ids,['ABSTRACT-1']);assert.match(a.actions[0].sample_size_basis,/先导实验/);assert.doesNotMatch(a.actions[0].sample_size_basis,/999/);
   const detail=await api.handle(`/api/jobs/${job.id}/candidates/0`);assert.equal(detail.artifacts.pdf_available,false);assert.equal(detail.artifacts.source_available,true);const source=await api.handle(`/api/jobs/${job.id}/candidates/0/source`);assert.equal(source.blocks[0].text,'Actual fixture abstract: method and finding are described here.');
   const svg=await api.handle(`/api/papers/D001/assets/research-flow.svg`,{binary:true});assert.match(await svg.text(),/分析者绘制/);
-  for(const call of mock.calls){assert.equal(call.options.redirect,'error');if(call.url.startsWith('https://api.crossref.org'))assert.equal(call.options.headers?.Authorization,undefined);else assert.equal(new URL(call.url).origin,'https://models.example');}
+  for(const call of mock.calls){assert.equal(call.options.redirect,'error');if(/^https:\/\/api\.(crossref|openalex)\.org/.test(call.url))assert.equal(call.options.headers?.Authorization,undefined);else assert.equal(new URL(call.url).origin,'https://models.example');}
   assert.equal(JSON.stringify(store.snapshot()).includes(SECRET),false);
 });
 
 test('no abstract means no model analysis, real shortage, and progressive search ranges',async()=>{
   const mock=mockFetch([paper('10.1234/no-abstract','Title without an abstract','')]);const {api,project}=await setup(mock.fetchImpl);const job=await settled(api,(await start(api,project,5)).id);
-  assert.equal(job.drafts_analyzed,0);assert.equal(job.checkpoint.draft_shortfall,5);assert.equal(job.checkpoint.candidates[0].status,'no_fulltext');assert.equal(mock.calls.filter(x=>x.url.endsWith('/chat/completions')).length,0);assert.equal(job.checkpoint.search_log.length,3);assert.match(mock.calls[0].url,/from-pub-date/);assert.equal(new URL(mock.calls.at(-1).url).searchParams.has('filter'),false);
+  assert.equal(job.drafts_analyzed,0);assert.equal(job.checkpoint.draft_shortfall,5);assert.equal(job.checkpoint.candidates[0].status,'no_fulltext');assert.equal(mock.calls.filter(x=>x.url.endsWith('/chat/completions')&&!JSON.parse(x.options.body).messages[0].content.includes('实质相关性筛选')).length,0);assert.equal(job.checkpoint.search_log.length,6);const searches=mock.calls.filter(x=>x.url.startsWith('https://api.crossref.org'));assert.match(searches[0].url,/from-pub-date/);assert.equal(new URL(searches.at(-1).url).searchParams.has('filter'),false);
 });
 
 test('repeated runs and another project reuse stored drafts without another paid analysis or another draft number',async()=>{
@@ -108,7 +110,7 @@ test('opening an interrupted browser workspace marks jobs recoverable without an
 test('JSON, Markdown and offline HTML exports share the same draft record and never include API credentials',async()=>{
   const mock=mockFetch([paper('10.1234/export','<script>unsafe</script> Export fixture')]);const {api,project}=await setup(mock.fetchImpl);await settled(api,(await start(api,project)).id);
   for(const kind of ['json','markdown','html']){const blob=await api.handle(`/api/projects/${project.id}/export?kind=${kind}`,{binary:true}),content=await blob.text();assert.equal(content.includes(SECRET),false);assert.equal(content.includes('api_key'),false);assert.match(content,/summary|摘要|总结/);if(kind==='json'){const bundle=JSON.parse(content);assert.equal(bundle.papers[0].analysis.verified,false);assert.equal(bundle.project.name,'Fixture topic');assert.equal(bundle.jobs[0].checkpoint.candidates.length,1);}if(kind==='html'){assert.equal(blob.type,'text/html;charset=utf-8');assert.doesNotMatch(content,/<script>/);assert.match(content,/未执行外部技能/);}}
-  await assert.rejects(api.handle(`/api/projects/${project.id}/references`,{method:'POST',body:new FormData()}),/暂不读取参考 PDF/);
+  await assert.rejects(api.handle(`/api/projects/${project.id}/references`,{method:'POST',body:new FormData()}),/请选择参考 PDF/);
 });
 
 test('browsers without Web Locks cannot start a batch and do not silently risk a parallel writer',async()=>{
@@ -122,7 +124,7 @@ test('another tab reads current checkpoints but cannot overwrite a running works
   const mock=mockFetch([paper('10.1234/tabs','Cross-tab fixture')],{analysisGate:async()=>{startedResolve();await finish;}});
   const {api,project,store}=await setup(mock.fetchImpl),other=createBrowserApi({store,fetchImpl:mock.fetchImpl});await other.configure(config);
   const job=await start(api,project);await started;
-  const current=await other.handle('/api/workspace/status');assert.equal(current.active_job.id,job.id);assert.equal(current.active_job.stage,'摘要分析');
+  const current=await other.handle('/api/workspace/status');assert.equal(current.active_job.id,job.id);assert.equal(current.active_job.stage,'生成摘要研究报告');
   await assert.rejects(other.handle('/api/projects',{method:'POST',body:JSON.stringify({name:'Must not overwrite'})}),/另一个标签页正在分析/);
   await assert.rejects(other.handle(`/api/jobs/${job.id}/cancel`,{method:'POST'}),/原标签页取消/);
   await assert.rejects(start(other,project),/已有浏览器分析批次/);
@@ -153,7 +155,7 @@ test('an end-of-job storage failure stays visible in memory and can be exported 
 
 test('candidate-only shortages and search reasons remain in every export even when no analysis could run',async()=>{
   const mock=mockFetch([paper('10.1234/gap','Candidate without abstract','')]);const {api,project}=await setup(mock.fetchImpl);await settled(api,(await start(api,project)).id);
-  for(const kind of ['json','markdown','html']){const content=await (await api.handle(`/api/projects/${project.id}/export?kind=${kind}`)).text();assert.match(content,/Candidate without abstract/);assert.match(content,/检索源未提供摘要/);assert.match(content,/Fixture research question/);if(kind==='json'){const bundle=JSON.parse(content);assert.equal(bundle.papers.length,0);assert.equal(bundle.jobs[0].checkpoint.draft_shortfall,1);assert.equal(bundle.jobs[0].checkpoint.search_log.length,3);}}
+  for(const kind of ['json','markdown','html']){const content=await (await api.handle(`/api/projects/${project.id}/export?kind=${kind}`)).text();assert.match(content,/Candidate without abstract/);assert.match(content,/补充摘要与开放全文|检索源未提供摘要/);assert.match(content,/Fixture research question/);if(kind==='json'){const bundle=JSON.parse(content);assert.equal(bundle.papers.length,0);assert.equal(bundle.jobs[0].checkpoint.draft_shortfall,1);assert.equal(bundle.jobs[0].checkpoint.search_log.length,6);}}
 });
 
 test('cross-project reuse shows a scope-transfer boundary in the reader and all exports without mutating the original analysis',async()=>{
