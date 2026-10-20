@@ -1,7 +1,7 @@
 import {demoProject, demoPapers} from './demo.js';
 import {activeStatuses, needsEvidence, summarizeBatch, candidateMatches, paperIdsForBatch} from './results.js';
 import {apiOrigin, configurationComplete, scopeConfirmed, workflowState} from './workflow.js';
-import {createBrowserApi} from './browser-api.js?v=20261020-reports';
+import {createBrowserApi} from './browser-api.js?v=20261020-reports2';
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -103,10 +103,20 @@ function reportRecords(){
   const papers=[...state.papers],knownIds=new Set(papers.map(p=>p.id)),knownIdentity=new Set(papers.map(p=>p.doi?.toLowerCase()||p.title));
   for(const job of state.jobs)for(const [index,item] of (job.checkpoint?.candidates||[]).entries()){
     const identity=item.doi?.toLowerCase()||item.title;
-    if(!item.analysis||knownIds.has(item.paper_id)||knownIdentity.has(identity))continue;
+    if(!hasReport(item.analysis)||knownIds.has(item.paper_id)||knownIdentity.has(identity))continue;
     papers.push({...item,id:item.paper_id||`candidate-${job.id}-${index}`,batch_id:job.id,analysis:item.analysis,_candidateJob:job.id,_candidateIndex:index});knownIdentity.add(identity);
   }
   return papers;
+}
+function hasReport(analysis){return typeof analysis?.summary==='string'&&Boolean(analysis.summary.trim());}
+function displayAnalysis(value){
+  const analysis=value&&typeof value==='object'?{...value}:{};
+  for(const key of ['flow_steps','sources','verification_gaps','unread','reproduction_checklist','reading_list'])analysis[key]=Array.isArray(analysis[key])?analysis[key].filter(x=>x!=null):typeof analysis[key]==='string'?[analysis[key]]:[];
+  analysis.flow_steps=analysis.flow_steps.filter(x=>typeof x==='string');
+  for(const key of ['actions','evidence','visuals'])analysis[key]=(Array.isArray(analysis[key])?analysis[key]:[]).filter(x=>x&&typeof x==='object'&&!Array.isArray(x)).map(x=>({...x}));
+  for(const evidence of analysis.evidence)evidence.source_block_ids=Array.isArray(evidence.source_block_ids)?evidence.source_block_ids.filter(x=>typeof x==='string'):[];
+  for(const action of analysis.actions)action.evidence_ids=Array.isArray(action.evidence_ids)?action.evidence_ids.filter(x=>typeof x==='string'):[];
+  return analysis;
 }
 function batchReportCounts(job){
   const ids=paperIdsForBatch(job),reused=new Set(job.checkpoint?.reused||[]),reports=reportRecords().filter(p=>p.batch_id===job.id||ids.has(p.id));
@@ -157,7 +167,7 @@ function render(){
   $('deleteProject').hidden=state.demo;$('deleteProject').disabled=Boolean(state.projectLoading||state.connecting);
   if(state.nav==='library')renderPapers();else renderProjects();
 }
-function tags(p){return p.tags||state.project?.scope?.keywords?.slice(0,3)||[];}
+function tags(p){return Array.isArray(p.tags)&&p.tags.length?p.tags:Array.isArray(state.project?.scope?.keywords)?state.project.scope.keywords.slice(0,3):[];}
 function renderPapers(){
   if((state.offline||state.connecting)&&!state.papers.length){$('batchSummary').hidden=true;$('candidatePanel').hidden=true;$('resultCount').textContent='私人资料尚未读取';$('cards').innerHTML='<div class="empty"><h3>等待连接私人研究空间</h3><p>连接恢复后显示文献，不会用示例替代你的研究记录。</p></div>';return;}
   if(state.projectLoading){$('batchSummary').hidden=true;$('candidatePanel').hidden=true;$('resultCount').textContent='正在同步当前课题';$('cards').innerHTML='<div class="empty is-loading" role="status"><h3>正在读取文献与批次…</h3><p>切换完成后显示当前课题的记录。</p></div>';return;}
@@ -169,7 +179,7 @@ function renderPapers(){
   $('batchSelect').innerHTML=state.jobs.map(j=>`<option value="${esc(j.id)}">${esc(batchLabel(j))} · ${esc(dateLabel(j.created_at))}</option>`).join('');$('batchSelect').value=job?.id||'';
   $('batchSelect').hidden=state.demo||state.view!=='latest'||!state.jobs.length;
   let list=papers.filter(p=>{
-    const a=p.analysis;
+    const a=displayAnalysis(p.analysis);
     return (state.view!=='latest'||p.batch_id===latest||ids.has(p.id))&&(!q||JSON.stringify([p.title,p.doi,a.summary,a.actions,tags(p)]).toLocaleLowerCase().includes(q))&&(!tag||tags(p).includes(tag))&&(!date||a.analyzed_date===date)&&(!priority||a.actions?.some(x=>x.priority===priority))&&(!status||(status==='verified')===!!a.verified);
   });
   list.sort((a,b)=>(b.analysis.analyzed_date||'').localeCompare(a.analysis.analyzed_date||''));
@@ -190,10 +200,10 @@ function renderCandidates(){
   const candidates=(job.checkpoint?.candidates||[]);
   const query=$('search').value;
   const order={unverified:0,no_fulltext:1,pending:2,completed:3,duplicate:4,reused:5,excluded:6};
-  const matches=candidates.map((item,index)=>({item,index})).filter(({item})=>!item.analysis&&candidateMatches(item,state.candidateFilter,query)).sort((a,b)=>(order[a.item.status]??9)-(order[b.item.status]??9)||a.index-b.index);
+  const matches=candidates.map((item,index)=>({item,index})).filter(({item})=>!hasReport(item.analysis)&&candidateMatches(item,state.candidateFilter,query)).sort((a,b)=>(order[a.item.status]??9)-(order[b.item.status]??9)||a.index-b.index);
   const s=summarizeBatch(job);
   const opened=$('candidateDetails')?.open;
-  panel.innerHTML=`<details id="candidateDetails" ${opened?'open':''}><summary>本批检索记录 · ${candidates.filter(item=>!item.analysis).length} 条未生成报告的题录</summary><p>仅保留题录、筛选理由和资料缺口；已生成的报告显示在上方。</p>${s.diagnostics.length?bullet(s.diagnostics):''}<div class="candidate-toolbar"><label>状态 <select id="candidateStatus" aria-label="筛选候选状态"><option value="needs">待补资料</option><option value="no_fulltext">缺少可读内容</option><option value="unverified">尚待分析</option><option value="excluded">已排除</option><option value="all">全部题录</option></select></label><span>显示 ${Math.min(matches.length,state.candidateLimit)} / ${matches.length} 条</span></div><div class="candidate-list">${matches.slice(0,state.candidateLimit).map(({item,index})=>candidateCard(job,item,index)).join('')||'<p>当前状态下没有未生成报告的题录。</p>'}</div>${matches.length>state.candidateLimit?'<button class="outline" id="moreCandidates">再显示 12 条</button>':''}</details>`;
+  panel.innerHTML=`<details id="candidateDetails" ${opened?'open':''}><summary>本批检索记录 · ${candidates.filter(item=>!hasReport(item.analysis)).length} 条未生成报告的题录</summary><p>仅保留题录、筛选理由和资料缺口；已生成的报告显示在上方。</p>${s.diagnostics.length?bullet(s.diagnostics):''}<div class="candidate-toolbar"><label>状态 <select id="candidateStatus" aria-label="筛选候选状态"><option value="needs">待补资料</option><option value="no_fulltext">缺少可读内容</option><option value="unverified">尚待分析</option><option value="excluded">已排除</option><option value="all">全部题录</option></select></label><span>显示 ${Math.min(matches.length,state.candidateLimit)} / ${matches.length} 条</span></div><div class="candidate-list">${matches.slice(0,state.candidateLimit).map(({item,index})=>candidateCard(job,item,index)).join('')||'<p>当前状态下没有未生成报告的题录。</p>'}</div>${matches.length>state.candidateLimit?'<button class="outline" id="moreCandidates">再显示 12 条</button>':''}</details>`;
   $('candidateStatus').value=state.candidateFilter;$('candidateStatus').onchange=()=>{state.candidateFilter=$('candidateStatus').value;state.candidateLimit=12;renderCandidates();};
   $('moreCandidates')?.addEventListener('click',()=>{state.candidateLimit+=12;renderCandidates();});
   bindResultActions(panel);bindUploads(panel);
@@ -216,13 +226,13 @@ function bindUploads(root){root.querySelectorAll('[data-upload-job]').forEach(in
   finally{if(input.isConnected){input.disabled=false;input.value='';}}
 });}
 function paperCard(p){
-  const a=p.analysis,priority=a.actions?.[0]?.priority;
+  const a=displayAnalysis(p.analysis),verified=state.mode!=='direct'&&a.verified,priority=a.actions?.[0]?.priority;
   let content=`<p class="summary">${esc(a.summary)}</p>`;
   if(state.view==='evidence') content=(a.evidence||[]).map(e=>`<div class="action-item"><strong>${esc(e.id)} · ${esc(e.claim)}</strong><p>${esc(e.observation)}</p><span class="tag">${esc(e.source_block_ids.join(' · ')||'合成示例 · 无真实来源')}</span></div>`).join('');
   else if(state.view==='actions')content=(a.actions||[]).map(x=>`<details class="action-item"><summary><span class="tag priority">${esc(x.priority)}</span> ${esc(x.title)}</summary><p>假设：${esc(x.hypothesis)}</p><p>方法与对照：${esc(x.method)} ${esc(x.controls)}</p><p>支持方向：${esc(x.supporting)}</p><p>削弱方向：${esc(x.weakening)}</p><p>资源与成果：${esc(x.resources)} ${esc(x.deliverable)}</p><p>样本量与阈值：${esc(x.sample_size_basis)}</p></details>`).join('')||'<p class="summary">证据不足，暂未提出可执行研究行动。</p>';
   else if(a.flow_steps?.length)content+=`<div class="mini-flow">${a.flow_steps.slice(0,4).map((x,i)=>`${i?'<b>→</b>':''}<span>${esc(x)}</span>`).join('')}</div><div class="flow-label">分析者绘制 · 流程概览，非原论文图</div>`;
   const job=state.jobs.find(j=>j.id===p.batch_id),batch=job?batchLabel(job):'批次未记录';
-  return `<article class="paper-card"><div class="card-top"><span>${esc(p.id)} · ${esc(batch)}</span>${badge(state.demo?'合成示例':reportLabel(p),a.verified?'success':'neutral')}</div><div class="card-body"><h3><button class="title-button" data-paper="${esc(p.id)}">${esc(p.title)}</button></h3><p class="journal">${esc(p.journal||'发表信息待确认')} · ${esc(p.year||'年份待确认')}</p><div class="tags">${tags(p).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}${priority?`<span class="tag priority">${esc(priority)} 优先级</span>`:''}</div>${content}</div><div class="card-bottom"><span>${state.demo?'不对应真实论文':a.verified?'已完成模型核验':'图表与公式待核验'}</span><button data-paper="${esc(p.id)}">阅读报告 →</button></div></article>`;
+  return `<article class="paper-card"><div class="card-top"><span>${esc(p.id)} · ${esc(batch)}</span>${badge(state.demo?'合成示例':reportLabel(p),verified?'success':'neutral')}</div><div class="card-body"><h3><button class="title-button" data-paper="${esc(p.id)}">${esc(p.title)}</button></h3><p class="journal">${esc(p.journal||'发表信息待确认')} · ${esc(p.year||'年份待确认')}</p><div class="tags">${tags(p).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}${priority?`<span class="tag priority">${esc(priority)} 优先级</span>`:''}</div>${content}</div><div class="card-bottom"><span>${state.demo?'不对应真实论文':verified?'已完成模型核验':'图表与公式待核验'}</span><button data-paper="${esc(p.id)}">阅读报告 →</button></div></article>`;
 }
 function section(title,content,id){return `<section class="reader-section"${id?` id="reading-${id}"`:''}><h2>${title}</h2>${content}</section>`;}
 function para(value){return `<p>${esc(value||'尚未记录')}</p>`;}
@@ -233,7 +243,7 @@ function visualContent(a,artifacts){
   return (a.visuals||[]).map(v=>`<h3>${esc(v.label)}</h3><figure><img data-asset="page-${Number(v.page)}.png" alt="PDF 第 ${Number(v.page)} 页原图"><figcaption>原论文 PDF 第 ${Number(v.page)} 页 · 点击放大</figcaption></figure>${para(v.explanation)}${para('核验边界：'+(v.limitations||'尚待核对'))}`).join('')+((artifacts?.image_pages||[]).filter(page=>!described.has(page)).map(page=>`<details><summary>PDF 第 ${Number(page)} 页原页 · ${checked.has(page)?'已保存页面核验记录':'已获取，尚未核验'}</summary><figure><img data-asset="page-${Number(page)}.png" alt="PDF 第 ${Number(page)} 页原页"><figcaption>实际获取的 PDF 页面，不表示存在编号图表。页面核验与全篇结论复核分别记录。</figcaption></figure></details>`).join(''))||para('尚无已实际核验的原图记录。取得图片不代表已核验。');
 }
 function readingBody(p,{draft=false,notes=[],notice='',artifacts=null}={}){
-  const a=p.analysis||{},parts=[];
+  const a=displayAnalysis(p.analysis),parts=[];
   parts.push(['summary','总结与问题',para(a.summary)+`<h3>科学问题</h3>`+para(a.scientific_question)]);
   if(a.flow_steps?.length)parts.push(['flow','研究流程',`<p class="reader-meta">分析者绘制 · 研究流程示意，非原论文图</p><img data-asset="research-flow.svg" alt="分析者绘制的研究流程">`]);
   parts.push(['design','研究设计',`<dl>${[['variables','变量'],['samples','样本'],['equipment','设备'],['parameters','参数'],['controls','对照'],['repeats','独立重复'],['statistics','统计设计']].map(([key,label])=>`<dt>${label}</dt><dd>${esc(a[key]||'尚未重建；不推定为原文未报告')}</dd>`).join('')}</dl>`]);

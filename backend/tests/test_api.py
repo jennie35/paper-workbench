@@ -138,6 +138,72 @@ def test_candidate_prefers_provisional_and_tolerates_incomplete_files(logged):
     assert logged.get(f'/api/jobs/{jid}/candidates/0').json()['analysis']['summary'] == analysis()['summary']
 
 
+def test_job_report_projection_exposes_real_draft_without_completing_or_persisting_it(logged):
+    jid, folder = candidate_fixture(logged)
+    stale = dict(analysis(), summary='Older draft report')
+    partial = dict(analysis(), summary='Actual partial report', verified=True, artifact_dir='PRIVATE-ARTIFACT-PATH')
+    (folder / 'draft.json').write_text(json.dumps(stale), 'utf-8')
+    (folder / 'provisional.json').write_text(json.dumps(partial), 'utf-8')
+    with session() as s:
+        job = s.get(Job, jid)
+        pid, original_checkpoint = job.project_id, job.checkpoint
+    # Later scope edits cannot redirect a historical batch's report projection.
+    logged.put(f'/api/projects/{pid}/scope', json={'research_question': 'Edited scope', 'keywords': ['new scope'], 'include': '', 'exclude': '', 'inferred': False})
+    single = logged.get(f'/api/jobs/{jid}')
+    listing = logged.get(f'/api/projects/{pid}/jobs')
+    assert single.status_code == listing.status_code == 200
+    for response, data in [(single, single.json()), (listing, listing.json()[0])]:
+        candidate = data['checkpoint']['candidates'][0]
+        assert candidate['analysis']['summary'] == 'Actual partial report'
+        assert candidate['analysis']['verified'] is False
+        assert candidate['analysis']['provisional'] is True
+        assert candidate['status'] == 'unverified'
+        assert data['checkpoint']['completed'] == []
+        assert data['checkpoint']['shortfall'] == 5
+        assert 'PRIVATE-ARTIFACT-PATH' not in response.text
+        assert 'artifact_dir' not in candidate['analysis']
+    with session() as s:
+        assert s.get(Job, jid).checkpoint == original_checkpoint
+    assert json.loads((folder / 'provisional.json').read_text('utf-8')) == partial
+    assert logged.get(f'/api/projects/{pid}/papers').json() == []
+    # A partially written file falls back to an earlier valid draft.
+    (folder / 'provisional.json').write_text('{incomplete', 'utf-8')
+    assert logged.get(f'/api/jobs/{jid}').json()['checkpoint']['candidates'][0]['analysis']['summary'] == 'Older draft report'
+
+
+def test_job_report_projection_confines_cache_and_omits_missing_drafts(logged, monkeypatch, tmp_path):
+    jid, _ = candidate_fixture(logged, status='no_fulltext')
+    with session() as s:
+        pid = s.get(Job, jid).project_id
+    assert 'analysis' not in logged.get(f'/api/jobs/{jid}').json()['checkpoint']['candidates'][0]
+    (tmp_path / 'provisional.json').write_text(json.dumps(dict(analysis(), summary='OUTSIDE-CACHE-CONTENT')), 'utf-8')
+    monkeypatch.setattr('app.pipeline.candidate_folder', lambda *args: tmp_path)
+    for path in [f'/api/jobs/{jid}', f'/api/projects/{pid}/jobs']:
+        response = logged.get(path)
+        assert response.status_code == 200
+        assert 'OUTSIDE-CACHE-CONTENT' not in response.text
+        data = response.json()[0] if isinstance(response.json(), list) else response.json()
+        assert 'analysis' not in data['checkpoint']['candidates'][0]
+
+
+def test_job_report_projection_uses_legacy_scope_and_skips_registered_candidates(logged):
+    jid, folder = candidate_fixture(logged)
+    (folder / 'draft.json').write_text(json.dumps(analysis()), 'utf-8')
+    with session() as s:
+        job = s.get(Job, jid)
+        state = json.loads(job.checkpoint)
+        state.pop('scope_snapshot')
+        job.checkpoint = json.dumps(state)
+    assert logged.get(f'/api/jobs/{jid}').json()['checkpoint']['candidates'][0]['analysis']['summary'] == analysis()['summary']
+    with session() as s:
+        job = s.get(Job, jid)
+        state = json.loads(job.checkpoint)
+        state['candidates'][0]['status'] = 'completed'
+        state['candidates'][0]['paper_id'] = 'R001'
+        job.checkpoint = json.dumps(state)
+    assert 'analysis' not in logged.get(f'/api/jobs/{jid}').json()['checkpoint']['candidates'][0]
+
+
 def test_candidate_source_and_pdf_are_explicit_and_confined(logged, monkeypatch, tmp_path):
     jid, folder = candidate_fixture(logged)
     assert logged.get(f'/api/jobs/{jid}/candidates/0/pdf').status_code == 404

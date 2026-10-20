@@ -17,7 +17,7 @@
 | `POST /api/projects/{id}/references` | multipart `file` 上传范围参考 PDF；同课题相同文件指纹复用记录并返回 `reused:true` |
 | `POST /api/projects/{id}/infer-scope` | 根据课题和参考资料生成可编辑范围，不自动覆盖 |
 | `POST /api/projects/{id}/jobs` | `{count:5}`，返回任务 ID；允许 1–20 |
-| `GET /api/projects/{id}/jobs` | 批次记录、检查点、候选和缺额 |
+| `GET /api/projects/{id}/jobs` | 批次记录、检查点、候选和缺额；候选可带实际保存的临时 `analysis` 投影，不改写检查点或增加精读完成数 |
 | `GET /api/jobs/{id}` | 当前状态与检查点 |
 | `POST /api/jobs/{id}/cancel` | 请求在下一检查点停止 |
 | `POST /api/jobs/{id}/retry` | 从已保存阶段恢复整个批次，沿用原范围和当前模型配置；已完成论文不重复登记 |

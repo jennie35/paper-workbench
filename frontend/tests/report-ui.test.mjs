@@ -39,6 +39,7 @@ test('unverified saved reports render in the main report list even with zero ver
   const paper={id:'D001',batch_id:'batch',title:'Readable report',analysis:{verified:false,summary:'Actual source summary',actions:[]}};
   const job={id:'batch',checkpoint:{completed:[],reused:[]}},state={papers:[paper],jobs:[job],view:'latest',mode:'direct',demo:false};
   const context=vm.createContext({state,$,esc:String,reportRecords:()=>[paper],renderBatchSummary(){},tags:()=>[],selectedBatch:()=>job,paperIdsForBatch,batchLabel:()=> 'B001',dateLabel:String,activeStatuses,paperCard:p=>`<article>${p.title}</article>`,renderCandidates(){},renderBatchHistory(){},bindResultActions(){},clearFilters(){},batchForm(){}});
+  vm.runInContext(extract('function displayAnalysis(','function batchReportCounts('),context);
   vm.runInContext(extract('function renderPapers(){','function clearFilters('),context);context.renderPapers();
   assert.match($('cards').innerHTML,/Readable report/);assert.doesNotMatch($('cards').innerHTML,/尚无完成全部核验/);assert.match($('resultCount').textContent,/1 篇文献报告/);
 });

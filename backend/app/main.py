@@ -467,7 +467,26 @@ def delete_project(pid: str):
 
 
 def job_dict(j):
-    return {'id': j.id, 'project_id': j.project_id, 'requested': j.requested, 'status': j.status, 'stage': j.stage, 'cancel_requested': j.cancel, 'checkpoint': json.loads(j.checkpoint), 'error': j.error, 'created_at': j.created_at, 'updated_at': j.updated_at}
+    # Draft artifacts are written independently of the lightweight task checkpoint.
+    # Project them into this response only so report lists show useful work without
+    # rewriting history or treating a saved draft as a completed ledger entry.
+    state = json.loads(j.checkpoint)
+    scope = state.get('scope_snapshot')
+    if not scope:
+        with session() as s:
+            scope = json.loads(get_project(s, j.project_id).scope)
+    for candidate in state.get('candidates', []):
+        if not isinstance(candidate, dict) or candidate.get('status') == 'completed':
+            continue
+        candidate.pop('analysis', None)
+        try:
+            analysis = candidate_analysis(candidate_root(candidate, scope), candidate)
+        except (HTTPException, OSError, ValueError, TypeError, KeyError):
+            # A missing, malformed, or confined-out cache must not hide other jobs.
+            continue
+        if analysis is not None:
+            candidate['analysis'] = analysis
+    return {'id': j.id, 'project_id': j.project_id, 'requested': j.requested, 'status': j.status, 'stage': j.stage, 'cancel_requested': j.cancel, 'checkpoint': state, 'error': j.error, 'created_at': j.created_at, 'updated_at': j.updated_at}
 
 
 @app.get('/api/projects/{pid}/jobs', dependencies=[Depends(auth)])
@@ -529,9 +548,17 @@ def retry_job(jid: str):
     return {'id': jid, 'status': 'queued'}
 
 
+def candidate_root(candidate, scope):
+    """Derive a confined cache location from recorded metadata and scope only."""
+    from .pipeline import candidate_folder
+    root = candidate_folder(candidate, scope).resolve()
+    if not root.is_relative_to(DATA.resolve()):
+        raise HTTPException(404, '候选资源不存在')
+    return root
+
+
 def candidate_context(jid, index):
     """Locate only this authenticated candidate's cache, never a client-supplied path."""
-    from .pipeline import candidate_folder
     with session() as s:
         job = s.get(Job, jid)
         if not job:
@@ -542,10 +569,7 @@ def candidate_context(jid, index):
             raise HTTPException(404, '候选不存在')
         candidate = candidates[index]
         scope = state.get('scope_snapshot') or json.loads(get_project(s, job.project_id).scope)
-        root = candidate_folder(candidate, scope).resolve()
-        if not root.is_relative_to(DATA.resolve()):
-            raise HTTPException(404, '候选资源不存在')
-        return candidate, root, job.project_id
+        return candidate, candidate_root(candidate, scope), job.project_id
 
 
 def candidate_file(root, name):

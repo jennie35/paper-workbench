@@ -76,9 +76,16 @@ test('opening a D-number record always uses draft reading even if a stale verifi
 test('D-number paper cards lead to an honestly labelled report without claiming visual verification',()=>{
   const {context}=readerContext();
   vm.runInContext(extract('function paperCard(','function section('),context);
-  const markup=context.paperCard(paper());
+  const p=paper();p.analysis.verified=true;const markup=context.paperCard(p);
   assert.match(markup,/D001/);assert.match(markup,/待核验/);assert.match(markup,/摘要研究报告/);assert.match(markup,/阅读报告/);
   assert.doesNotMatch(markup,/进入精读与研究规划|>已模型核验<|>已完成精读</);
+});
+
+test('partial reports with invalid optional arrays remain readable without mutating saved evidence',()=>{
+  const {context}=readerContext(),p=paper();
+  p.analysis={...p.analysis,flow_steps:'One supplied step',actions:[null,{title:'Pending action',evidence_ids:'invalid'}],evidence:[null,{claim:'Unverified claim',source_block_ids:null}],visuals:{invalid:true},sources:null};
+  const saved=JSON.stringify(p);vm.runInContext(extract('function paperCard(','function section('),context);
+  assert.match(context.paperCard(p),/Generated fixture abstract analysis/);assert.match(context.readingBody(p,{draft:true}),/Unverified claim/);assert.equal(JSON.stringify(p),saved);
 });
 
 function directConnectionContext(){
