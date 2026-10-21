@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import {apiOrigin} from '../workflow.js';
+import {reportSections} from '../research-view.js';
 
 const code=readFileSync(new URL('../app.js',import.meta.url),'utf8');
 function extract(start,end){
@@ -50,7 +51,7 @@ test('direct settings opened from home stays in API settings and forwards contin
 
 function readerContext(){
   const state={mode:'direct',demo:false,view:'latest',papers:[],jobs:[]},display=[],assets=[];
-  const exportButton={addEventListener(){}},context=vm.createContext({state,esc,watermark:'Analysis performed using the norman-paper-reading skill | APPLIED-SIGNATURE',badge:label=>`<span>${esc(label)}</span>`,publicationLink:()=>'',tags:()=>[],showModal:(title,body)=>display.push({title,body}),renderMath(){},loadReaderAssets:async path=>assets.push(path),$:id=>id==='exportCandidate'?exportButton:null});
+  const exportButton={addEventListener(){}},context=vm.createContext({state,esc,reportSections,watermark:'Analysis performed using the norman-paper-reading skill | APPLIED-SIGNATURE',badge:label=>`<span>${esc(label)}</span>`,publicationLink:()=>'',tags:()=>[],showModal:(title,body)=>display.push({title,body}),renderMath(){},loadReaderAssets:async path=>assets.push(path),$:id=>id==='exportCandidate'?exportButton:null});
   vm.runInContext(extract('function reportLabel(','function badge('),context);
   vm.runInContext(extract('function section(','function renderMath('),context);
   vm.runInContext(extract('async function showPaper(','async function showCandidate('),context);

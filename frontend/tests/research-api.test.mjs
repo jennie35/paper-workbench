@@ -1,0 +1,57 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createBrowserApi} from '../browser-api.js';
+
+const copy=value=>JSON.parse(JSON.stringify(value));
+function memory(initial=null){let value=initial;return {load:async()=>value&&copy(value),save:async next=>{value=copy(next);},snapshot:()=>copy(value)};}
+function locks(){const held=new Set(),queues=new Map();return {query:async()=>({held:[...held].map(name=>({name}))}),async request(name,options,callback){if(typeof options==='function'){callback=options;options={};}if(held.has(name)&&options.ifAvailable)return callback(null);if(held.has(name))await new Promise(resolve=>{const queue=queues.get(name)||[];queue.push(resolve);queues.set(name,queue);});held.add(name);try{return await callback({name});}finally{held.delete(name);queues.get(name)?.shift()?.();}}};}
+const response=value=>Response.json({choices:[{message:{content:JSON.stringify(value)}}]});
+const config={base_url:'https://models.example/v1',api_key:'synthetic-research-contract-secret',text_model:'fixture-model'};
+const item=index=>({DOI:'10.5555/research-contract-'+index,title:['Synthetic measurement study '+index],abstract:'Actual supplied fixture abstract describing methods and limits.',author:[{given:'Fixture',family:'Author'}],type:'journal-article','container-title':['Synthetic journal'],'published-online':{'date-parts':[[2025,11]]},issued:{'date-parts':[[2026,1]]},volume:'2',issue:'1'});
+async function setup({failSynthesis=false}={}){
+  const store=memory(),lockManager=locks(),calls=[],items=[item(1),item(2)];let failures=Number(failSynthesis);
+  const fetchImpl=async(url,options={})=>{
+    if(String(url).startsWith('https://api.crossref.org'))return Response.json({message:{items}});
+    if(String(url).startsWith('https://api.openalex.org/works/'))return new Response('{}',{status:404});
+    if(String(url).startsWith('https://api.openalex.org'))return Response.json({results:[]});
+    const body=JSON.parse(options.body),system=body.messages[0].content,input=JSON.parse(body.messages[1].content);calls.push({system,input});
+    if(system.includes('实质相关性筛选'))return response({selected:input.candidates.map((_,index)=>({index,reason:'Direct relation to the current question.',score:0.95}))});
+    if(system.includes('对本批已保存论文做跨论文综合')){
+      if(failures-->0)return new Response('{}',{status:503});
+      return response({supports:[{record_ids:input.reports.slice(0,2).map(x=>x.record_id),claim:'Shared source boundary',reason:'Both fixture abstracts lack independent visual evidence.'}],conflicts:[],judgement_changes:[{record_ids:[input.reports[0].record_id],before:'Unknown',after:'Acquire full methods before transfer',reason:'The evidence is abstract-level.'}],priority_actions:[{record_id:input.reports[0].record_id,action_id:input.reports[0].actions[0].id,reason:'Resolve the methods gap first'}],route_decisions:[],limitations:['Synthetic fixture only']});
+    }
+    return response({summary:'A source-grounded synthetic report.',scientific_question:'What controls measurement variability?',evidence:[{claim:'A reported observation',observation:input.paper.abstract,source_block_ids:['ABSTRACT-1']}],research_logic:{paper_type:'method',storyline:{author_question:'Author question',reconstructed_question:'Reconstructed question',gap:'No independent test',hypothesis:'A stated hypothesis',reasoning:'Question to design to evidence'},study_design:{type:'method',fields:{train_test_split:'Not reported in the supplied abstract'}},transfer_insights:{direct:'No unconditional transfer',adapt:'Check the method under known constraints',avoid:'Do not assume causality',judgement_change:'Full methods are needed'}},actions:[]});
+  };
+  const api=createBrowserApi({store,lockManager,fetchImpl});await api.configure(config);const project=await api.handle('/api/projects',{method:'POST',body:'{"name":"Synthetic research topic"}'});
+  await api.handle(`/api/projects/${project.id}/scope`,{method:'PUT',body:JSON.stringify({core_question:'What controls measurement variability?',research_stage:'design',research_object:'Synthetic specimen',known_resources:'Existing instrument only',constraints:'No new equipment',reference_materials:'C:\\Private\\Study\\reference.pdf',storage_root:'C:/should-not-be-sent',keywords:['measurement controls'],default_count:2,output_language:'en',run_mode:'existing-task',inferred:false})});
+  return {api,project,store,calls,items,fetchImpl,lockManager};
+}
+async function settle(api,id){for(let index=0;index<1000;index++){const job=await api.handle('/api/jobs/'+id);if(!['running','queued'].includes(job.status))return job;await new Promise(resolve=>setTimeout(resolve,1));}throw new Error('Synthetic batch did not settle');}
+const start=(api,project,count)=>api.handle(`/api/projects/${project.id}/jobs`,{method:'POST',body:JSON.stringify(count?{count}:{})});
+
+test('one authorized batch uses topic configuration, produces the research contract, and saves synthesis without any GET model calls',async()=>{
+  const {api,project,store,calls,fetchImpl,lockManager}=await setup(),job=await settle(api,(await start(api,project)).id);
+  assert.equal(job.requested,2);assert.equal(job.trigger_source,'manual');assert.equal(job.checkpoint.scope_snapshot.run_mode,'existing-task');assert.equal(job.reports_generated,2);assert.equal(job.checkpoint.synthesis.status,'completed');assert.deepEqual(job.checkpoint.synthesis.record_ids,['D001','D002']);
+  const papers=await api.handle(`/api/projects/${project.id}/papers`);for(const paper of papers){assert.equal(paper.analysis.research_logic.paper_type,'method');assert.equal(paper.analysis.actions.length,1);assert.equal(paper.analysis.actions[0].status,'pending');assert.equal(paper.analysis.project_context.project_id,project.id);assert.equal(paper.analysis.project_context.scope_snapshot.known_resources,'Existing instrument only');assert.equal(paper.first_publication_date,'2025-11');assert.equal(paper.date_precision,'month');assert.equal(paper.issue_year,2026);assert.equal(paper.volume,'2');assert.equal(paper.analysis.verified,false);}
+  const analysisCalls=calls.filter(call=>call.input.paper);assert.equal(analysisCalls.length,2);assert.match(analysisCalls[0].system,/输出语言：en/);assert.equal(Object.hasOwn(analysisCalls[0].input.scope,'storage_root'),false);assert.doesNotMatch(JSON.stringify(analysisCalls[0].input.scope),/Private|should-not-be-sent/);
+  const paid=calls.length;assert.equal((await api.handle(`/api/jobs/${job.id}/synthesis`)).status,'completed');const reopened=createBrowserApi({store,lockManager,fetchImpl});await reopened.ready;assert.equal(reopened.hasSession(),false);assert.equal((await reopened.handle(`/api/jobs/${job.id}/synthesis`)).status,'completed');assert.equal(calls.length,paid);
+  for(const kind of ['json','markdown','html']){const exported=await (await api.handle(`/api/projects/${project.id}/export?kind=${kind}`)).text();assert.ok(exported.includes('Shared source boundary'),kind);assert.ok(exported.includes('Existing instrument only'),kind);assert.equal(exported.includes(config.api_key),false,kind);}
+});
+
+test('synthesis failure preserves reports and explicit retry only regenerates synthesis',async()=>{
+  const {api,project,calls}=await setup({failSynthesis:true}),job=await settle(api,(await start(api,project)).id);assert.equal(job.status,'completed');assert.equal(job.reports_generated,2);assert.equal(job.checkpoint.synthesis.status,'failed');const analysisCount=calls.filter(call=>call.input.paper).length;
+  assert.equal((await api.handle(`/api/jobs/${job.id}/synthesis`)).status,'failed');const retried=await api.handle(`/api/jobs/${job.id}/synthesis`,{method:'POST'});assert.equal(retried.status,'completed');assert.equal(calls.filter(call=>call.input.paper).length,analysisCount);assert.equal((await api.handle(`/api/projects/${project.id}/papers`)).length,2);
+});
+
+test('new literature is compared with prior project reports without rewriting their original resources',async()=>{
+  const {api,project,calls,items}=await setup();await settle(api,(await start(api,project)).id);items.push(item(3));await api.handle(`/api/projects/${project.id}/scope`,{method:'PUT',body:'{"known_resources":"Changed resources","default_count":1,"inferred":false}'});
+  const next=await settle(api,(await start(api,project)).id);assert.equal(next.reports_generated,1);assert.equal(next.checkpoint.synthesis.record_ids.length,3);const last=calls.filter(call=>call.input.reports).at(-1);assert.equal(last.input.reports.length,3);assert.equal(last.input.scope.known_resources,'Changed resources');assert.equal(last.input.reports.find(record=>record.record_id==='D001').original_resources,'Existing instrument only');assert.equal(last.input.reports.find(record=>record.record_id==='D003').original_resources,'Changed resources');
+  const before=calls.length;await assert.rejects(api.handle(`/api/projects/${project.id}/scope`,{method:'PUT',body:'{"default_count":21}'}),/1–20/);assert.equal(calls.length,before);
+});
+
+test('directory permission failure blocks ordinary reads while explicit root reconnection remains available',async()=>{
+  let denied=true,passedWorkspace='not-called';const saved={version:1,projects:[{id:'recovered',name:'Existing directory topic',scope:{research_question:'Existing question',inferred:false}}],papers:[],links:[],jobs:[],references:[],counter:7,publicSettings:{}};
+  const status={kind:'directory',supported:true,selected:true,name:'Selected root',permission:'prompt',needs_reconnect:true};
+  const store={load:async()=>{if(denied)throw new Error('Reconnect authorized main directory');return copy(saved);},save:async()=>{},getStatus:async()=>({...status,needs_reconnect:denied,permission:denied?'prompt':'granted'}),selectDirectory:async({workspace})=>{passedWorkspace=workspace;denied=false;return {status:{...status,needs_reconnect:false,permission:'granted'},workspace:copy(saved),reused:true};}};
+  const api=createBrowserApi({store,lockManager:locks(),fetchImpl:async()=>{throw new Error('No model calls');}});await api.ready;assert.equal((await api.storageStatus()).needs_reconnect,true);await assert.rejects(api.handle('/api/projects'),/Reconnect/);assert.equal((await api.selectDirectory()).reused,true);assert.equal(passedWorkspace,undefined);assert.equal((await api.handle('/api/projects'))[0].id,'recovered');assert.match((await api.handle('/api/projects'))[0].scope.storage_root,/Selected root/);
+});

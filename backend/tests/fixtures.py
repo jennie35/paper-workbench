@@ -5,6 +5,7 @@ def metadata(title='Test paper', doi='10.1234/example'):
 def analysis():
     return {
         'summary':'Synthetic fixture, not real research.',
+        'research_logic': {'reading_scope': {'acquired': ['Synthetic PDF fixture'], 'verified': [], 'unverified': []}, 'study_design': {'type': 'unknown', 'fields': {'边界': 'Synthetic software fixture, not scientific results'}}},
         'scientific_question':'How can a pipeline preserve evidence?',
         'author_conclusions':'Fixture statements only.',
         'analyst_inference':'No actual scientific inference.',

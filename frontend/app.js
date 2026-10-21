@@ -1,7 +1,8 @@
 import {demoProject, demoPapers} from './demo.js';
 import {activeStatuses, needsEvidence, summarizeBatch, candidateMatches, paperIdsForBatch} from './results.js';
 import {apiOrigin, configurationComplete, scopeConfirmed, workflowState} from './workflow.js';
-import {createBrowserApi} from './browser-api.js?v=20261020-reports2';
+import {createBrowserApi} from './browser-api.js?v=20261021-research';
+import {reportSections, synthesisHtml} from './research-view.js?v=20261021-research';
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -48,6 +49,15 @@ $('closeModal').onclick=closeModal;
 $('modal').addEventListener('close',clearAssets);
 function field(label,id,value='',type='text',help=''){return `<label class="field">${esc(label)}<input id="${id}" type="${type}" value="${esc(value)}" ${type==='password'?'autocomplete="new-password"':''}>${help?`<small>${esc(help)}</small>`:''}</label>`;}
 function area(label,id,value=''){return `<label class="field">${esc(label)}<textarea id="${id}">${esc(value)}</textarea></label>`;}
+function choice(label,id,options,value,help=''){return `<label class="field">${esc(label)}<select id="${id}">${options.map(([key,title])=>`<option value="${esc(key)}" ${key===value?'selected':''}>${esc(title)}</option>`).join('')}</select>${help?`<small>${esc(help)}</small>`:''}</label>`;}
+function researchConfigFields(scope){return `<details class="research-config" open><summary>课题条件 · 资源与约束</summary><div class="config-grid">${choice('当前研究阶段','scopeStage',[['exploration','探索'],['design','方案设计'],['experiment','实验开展'],['validation','方法验证'],['writing','论文撰写']],scope.research_stage||'exploration')}${field('每次目标新增篇数','scopeCount',scope.default_count||5,'number','默认 5 篇；可设为 1–20。')}${area('研究对象','scopeObject',scope.research_object)}${area('应用场景','scopeContext',scope.application_context)}${area('已有方法、模型或系统','scopeMethods',scope.existing_methods)}${area('已知设备、材料、数据与资源','scopeResources',scope.known_resources)}${area('预算、周期、样本、设备、伦理等约束','scopeConstraints',scope.constraints)}${area('参考资料及来源说明','scopeMaterials',scope.reference_materials)}${area('资料版本差异与待确认条件','scopeVersions',scope.version_differences)}${field('中文主题与同义词（逗号分隔）','scopeKeywordsZh',(scope.keywords_zh||[]).join(', '))}${field('English keywords / synonyms','scopeKeywordsEn',(scope.keywords_en||[]).join(', '))}${choice('输出语言','scopeLanguage',[['zh-CN','中文'],['en','English']],scope.output_language||'zh-CN')}${choice('运行方式','scopeRunMode',[['manual','立即执行一次 · 手动启动'],['existing-task','由已有定时任务触发']],scope.run_mode||'manual','此项记录运行偏好，不创建定时任务。在线直连需保持页面打开；已有定时任务由部署者接入后台。')}</div><p class="reader-meta">未知条件留空；论文中的设备与实验结果不会自动成为你的资源或已完成工作。参考路径与历史对话说明仅作为资料，不触发文件读取或执行命令。</p></details><label class="field">唯一长期保存位置<input id="scopeStorageRoot" readonly value="${esc(state.mode==='direct'?'请通过顶部「保存目录」选择并授权本机目录':state.settings.storage_root||scope.storage_root||'由部署者配置 DATA_DIR')}"><small>${state.mode==='direct'?'浏览器不能凭手填绝对路径访问磁盘。选择目录后才可确认已保存至该主目录；未绑定时只是浏览器草稿。':'后台主目录由部署配置控制；课题配置不能改写服务器存储位置。'}</small></label>`;}
+function readResearchConfigFields(){
+  const count=Number($('scopeCount').value);if(!Number.isInteger(count)||count<1||count>20)throw new Error('每次目标新增篇数应为 1–20 的整数。');
+  const value={default_count:count,research_stage:$('scopeStage').value,output_language:$('scopeLanguage').value,run_mode:$('scopeRunMode').value};
+  for(const [key,id] of [['research_object','scopeObject'],['application_context','scopeContext'],['existing_methods','scopeMethods'],['known_resources','scopeResources'],['constraints','scopeConstraints'],['reference_materials','scopeMaterials'],['version_differences','scopeVersions']])value[key]=$(id).value.trim();
+  for(const [key,id] of [['keywords_zh','scopeKeywordsZh'],['keywords_en','scopeKeywordsEn']])value[key]=$(id).value.split(/[,，\n]/).map(x=>x.trim()).filter(Boolean);
+  return value;
+}
 function modalError(error){const el=$('formMessage');if(el){el.textContent=error.message;el.className='error';el.setAttribute('role','alert');}else toast(error.message);}
 function modalContext(){const version=state.modalVersion;return ()=>$('modal').open&&state.modalVersion===version;}
 function busy(handler,label='处理中…'){return async event=>{
@@ -93,7 +103,7 @@ function connection(){
   $('demoNotice').hidden=!state.demo;$('modePill').textContent=state.demo?'DEMO · 合成数据':'PRIVATE · 私人课题库';$('modePill').classList.toggle('live',!state.demo);$('connectionDot').classList.toggle('live',!state.demo);$('connectionLabel').textContent=state.demo?'独立示例演示':'已连接私人服务';$('logout').hidden=state.demo;
   if(state.offline||state.connecting){$('modePill').textContent=state.connecting?'正在连接私人服务…':'私人服务连接中断';$('modePill').classList.remove('live');$('connectionDot').classList.remove('live');$('connectionLabel').textContent=state.connecting?'正在连接…':'未连接，数据未删除';}
   if(state.mode==='direct'&&!state.demo){$('modePill').textContent='ONLINE · API 直连';$('connectionLabel').textContent=state.settings.has_api_key?'已配置模型 API':'浏览器课题库 · 待填写 Key';$('logout').textContent='断开 API';}else $('logout').textContent='退出';
-  $('directNotice').hidden=state.demo||state.mode!=='direct';
+  $('directNotice').hidden=state.demo||state.mode!=='direct';$('storageButton').hidden=state.demo;
 }
 function dateLabel(value){const date=new Date(value);return Number.isNaN(date.valueOf())?'时间未记录':date.toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false});}
 function selectedBatch(){return state.jobs.find(job=>job.id===state.batchId)||state.jobs[0];}
@@ -153,7 +163,7 @@ function render(){
   $('pageEyebrow').textContent=home?'YOUR RESEARCH PROJECTS':'PROJECT RESEARCH WORKSPACE';
   $('pageTitle').textContent=home?'从一个课题，开始研究。':'课题文献报告';
   $('pageIntro').textContent=home?'选择或创建课题，在课题内积累文献报告与研究行动。':'启动分析后，报告会按批次显示在下方。';
-  if(home){$('newBatch').textContent='＋ 创建课题';$('batchSummary').hidden=true;$('candidatePanel').hidden=true;}
+  if(home){$('newBatch').textContent='＋ 创建课题';$('batchSummary').hidden=true;$('candidatePanel').hidden=true;$('researchSynthesis').hidden=true;}
   else if(state.nav==='library')renderWorkflow();
   else $('newBatch').textContent=state.activeJob&&!state.demo?'查看运行中的批次 →':'＋ 开始检索与分析';
   $('breadcrumbName').textContent=home?'课题首页':state.project.name;$('topicTitle').textContent=state.project?.name||'建立你的第一个研究课题';$('topicGoal').textContent=state.project?.goal||'输入课题名称或上传 PDF，确定研究范围后开始分析。';
@@ -192,7 +202,7 @@ function renderPapers(){
   $('cards').querySelector('[data-clear]')?.addEventListener('click',clearFilters);
   $('cards').querySelector('[data-all]')?.addEventListener('click',()=>{switchView('all');renderPapers();});
   $('cards').querySelector('[data-first-batch]')?.addEventListener('click',batchForm);
-  renderCandidates();renderBatchHistory();bindResultActions($('cards'));
+  renderCandidates();renderBatchHistory();renderSynthesis();bindResultActions($('cards'));
 }
 function clearFilters(){resetFilters();renderPapers();}
 function renderCandidates(){
@@ -228,8 +238,8 @@ function bindUploads(root){root.querySelectorAll('[data-upload-job]').forEach(in
 function paperCard(p){
   const a=displayAnalysis(p.analysis),verified=state.mode!=='direct'&&a.verified,priority=a.actions?.[0]?.priority;
   let content=`<p class="summary">${esc(a.summary)}</p>`;
-  if(state.view==='evidence') content=(a.evidence||[]).map(e=>`<div class="action-item"><strong>${esc(e.id)} · ${esc(e.claim)}</strong><p>${esc(e.observation)}</p><span class="tag">${esc(e.source_block_ids.join(' · ')||'合成示例 · 无真实来源')}</span></div>`).join('');
-  else if(state.view==='actions')content=(a.actions||[]).map(x=>`<details class="action-item"><summary><span class="tag priority">${esc(x.priority)}</span> ${esc(x.title)}</summary><p>假设：${esc(x.hypothesis)}</p><p>方法与对照：${esc(x.method)} ${esc(x.controls)}</p><p>支持方向：${esc(x.supporting)}</p><p>削弱方向：${esc(x.weakening)}</p><p>资源与成果：${esc(x.resources)} ${esc(x.deliverable)}</p><p>样本量与阈值：${esc(x.sample_size_basis)}</p></details>`).join('')||'<p class="summary">证据不足，暂未提出可执行研究行动。</p>';
+  if(state.view==='evidence') content=Array.isArray(a.research_logic?.reading_priorities)&&a.research_logic.reading_priorities.length?a.research_logic.reading_priorities.map(x=>`<div class="action-item"><strong>${esc(x.locator||'精读位置待核验')}</strong><p>${esc(x.reason)}</p><p>影响判断：${esc(x.decision_impact||'尚待核对')}</p></div>`).join(''):(a.evidence||[]).map(e=>`<div class="action-item"><strong>${esc(e.id)} · ${esc(e.claim)}</strong><p>${esc(e.observation)}</p><span class="tag">${esc(e.source_block_ids.join(' · ')||'尚无可靠来源定位')}</span></div>`).join('');
+  else if(state.view==='actions')content=(a.actions||[]).map(x=>`<details class="action-item"><summary><span class="tag priority">${esc(x.priority)}</span> ${esc(x.title)} · 待执行</summary><p>假设：${esc(x.hypothesis)}</p><p>方法与独立单位：${esc(x.method)}；${esc(x.experimental_unit||'未核验')}</p><p>基线、对照与混杂控制：${esc(x.controls)}；${esc(x.confounds||'需明确')}</p><p>支持方向：${esc(x.supporting)}</p><p>削弱方向：${esc(x.weakening)}</p><p>资源与前置条件：${esc(x.resources)}；${esc(x.prerequisites||'需确认')}</p><p>停止条件：${esc(x.stopping_criteria||'尚未设定，先确认可执行协议')}</p><p>交付成果：${esc(x.deliverable)}</p><p>样本量与阈值：${esc(x.sample_size_basis)}</p></details>`).join('')||'<p class="summary">证据不足，先补齐可支持行动的来源。</p>';
   else if(a.flow_steps?.length)content+=`<div class="mini-flow">${a.flow_steps.slice(0,4).map((x,i)=>`${i?'<b>→</b>':''}<span>${esc(x)}</span>`).join('')}</div><div class="flow-label">分析者绘制 · 流程概览，非原论文图</div>`;
   const job=state.jobs.find(j=>j.id===p.batch_id),batch=job?batchLabel(job):'批次未记录';
   return `<article class="paper-card"><div class="card-top"><span>${esc(p.id)} · ${esc(batch)}</span>${badge(state.demo?'合成示例':reportLabel(p),verified?'success':'neutral')}</div><div class="card-body"><h3><button class="title-button" data-paper="${esc(p.id)}">${esc(p.title)}</button></h3><p class="journal">${esc(p.journal||'发表信息待确认')} · ${esc(p.year||'年份待确认')}</p><div class="tags">${tags(p).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}${priority?`<span class="tag priority">${esc(priority)} 优先级</span>`:''}</div>${content}</div><div class="card-bottom"><span>${state.demo?'不对应真实论文':verified?'已完成模型核验':'图表与公式待核验'}</span><button data-paper="${esc(p.id)}">阅读报告 →</button></div></article>`;
@@ -243,24 +253,17 @@ function visualContent(a,artifacts){
   return (a.visuals||[]).map(v=>`<h3>${esc(v.label)}</h3><figure><img data-asset="page-${Number(v.page)}.png" alt="PDF 第 ${Number(v.page)} 页原图"><figcaption>原论文 PDF 第 ${Number(v.page)} 页 · 点击放大</figcaption></figure>${para(v.explanation)}${para('核验边界：'+(v.limitations||'尚待核对'))}`).join('')+((artifacts?.image_pages||[]).filter(page=>!described.has(page)).map(page=>`<details><summary>PDF 第 ${Number(page)} 页原页 · ${checked.has(page)?'已保存页面核验记录':'已获取，尚未核验'}</summary><figure><img data-asset="page-${Number(page)}.png" alt="PDF 第 ${Number(page)} 页原页"><figcaption>实际获取的 PDF 页面，不表示存在编号图表。页面核验与全篇结论复核分别记录。</figcaption></figure></details>`).join(''))||para('尚无已实际核验的原图记录。取得图片不代表已核验。');
 }
 function readingBody(p,{draft=false,notes=[],notice='',artifacts=null}={}){
-  const a=displayAnalysis(p.analysis),parts=[];
-  parts.push(['summary','总结与问题',para(a.summary)+`<h3>科学问题</h3>`+para(a.scientific_question)]);
-  if(a.flow_steps?.length)parts.push(['flow','研究流程',`<p class="reader-meta">分析者绘制 · 研究流程示意，非原论文图</p><img data-asset="research-flow.svg" alt="分析者绘制的研究流程">`]);
-  parts.push(['design','研究设计',`<dl>${[['variables','变量'],['samples','样本'],['equipment','设备'],['parameters','参数'],['controls','对照'],['repeats','独立重复'],['statistics','统计设计']].map(([key,label])=>`<dt>${label}</dt><dd>${esc(a[key]||'尚未重建；不推定为原文未报告')}</dd>`).join('')}</dl>`]);
-  parts.push(['evidence','证据与结论','<h3>作者结论</h3>'+para(a.author_conclusions)+'<h3>分析者推断</h3>'+para(a.analyst_inference)+(a.evidence||[]).map(e=>`<div class="evidence-block"><h3>${esc(e.id)} · ${esc(e.claim)}</h3>${para(e.observation)}<p class="reader-meta">来源：${esc((e.source_block_ids||[]).join(' · ')||'尚无定位')}</p>${para(e.interpretation)}${para('局限：'+(e.limits||'尚待核对'))}</div>`).join('')]);
-  parts.push(['visuals','原图与公式',visualContent(a,artifacts)]);
-  parts.push(['reading','精读清单',bullet(a.reading_list)||para('尚未生成精读清单')]);
-  parts.push(['future','未来研究启示',para(a.future_insights)+`<h3>迁移条件</h3>`+para(a.transfer_conditions)+`<h3>复现检查清单</h3>`+bullet(a.reproduction_checklist)]);
-  parts.push(['actions','下一步行动',(a.actions||[]).map(x=>`<h3><span class="tag priority">${esc(x.priority)}</span> ${esc(x.id)} ${esc(x.title)}</h3><p class="reader-meta">待执行方案 · 依据证据：${esc((x.evidence_ids||[]).join(' · '))}</p><dl>${[['gap','证据缺口'],['hypothesis','假设'],['method','方法'],['controls','对照'],['supporting','支持方向'],['weakening','削弱方向'],['resources','资源条件'],['sample_size_basis','样本量依据'],['deliverable','交付成果']].map(([key,label])=>`<dt>${label}</dt><dd>${esc(x[key]||'尚未记录')}</dd>`).join('')}</dl>`).join('')+para(a.roadmap||a.action_status||'尚无可执行研究行动，需先补齐证据。')]);
-  const gaps=[...new Set([...(a.verification_gaps||[]),...(a.unread||[])])];
-  parts.push(['sources','来源与核验边界',bullet(a.sources)+`<h3>未完成与未核验内容</h3>`+(gaps.length?bullet(gaps):para(draft?'完整精读尚未通过，请查看候选的缺口原因。':'未记录额外未读项；仍需独立人工复核。'))+coverageHtml(a.coverage,artifacts)]);
+  const a=displayAnalysis(p.analysis),parts=reportSections({...p,analysis:a},{
+    flowHtml:a.flow_steps.length?'<img data-asset="research-flow.svg" alt="分析者绘制，非论文原图">':'',
+    visualHtml:visualContent(a,artifacts),coverageHtml:coverageHtml(a.coverage,artifacts),currentScope:state.project?.scope,
+  });
   if(notes.length)parts.push(['notes','分段阅读记录',`<p>以下为已保存的模型阅读记录，保留来源块编号供追溯；不代表全文与全部原图均已完成核验。</p>`+notes.map((row,i)=>`<details${i===0?' open':''}><summary>阅读分段 ${i+1}${row.unread?.length?' · 存在未读项':''}</summary><div class="reading-notes">${esc(row.notes)}</div>${row.unread?.length?'<h3>待补内容</h3>'+bullet(row.unread):''}</details>`).join('')]);
   const nav=parts.map(([id,title])=>`<a href="#reading-${id}">${esc(title)}</a>`).join('');
   return `<article class="reader"><div class="candidate-meta">${badge(draft?reportLabel(p):state.demo?'合成演示':p.id,draft?'warning':'neutral')}<span>${esc(p.year||'年份未记录')} · ${esc(p.journal||'刊物信息未记录')}</span></div><h2>${esc(p.title)}</h2><p class="reader-meta">${esc((p.authors||[]).join(' · '))}<br>${esc(p.doi||'DOI 未记录')}</p>${draft?`<div class="reader-callout warning"><strong>报告依据与阅读边界</strong><p>${esc(notice||a.verification_status)}</p>${bullet(a.verification_gaps)}</div>`:state.demo?'<div class="reader-callout">合成示例，没有真实论文、数据或核验结论。</div>':`<div class="reader-callout">${esc(a.verification_status||'核验范围尚未记录')}<p>模型核验不等于独立人工复核，研究行动均为待执行方案。</p></div>`}${a.transfer_notice?`<div class="reader-callout">${esc(a.transfer_notice)}</div>`:''}<div class="candidate-actions">${publicationLink(p)}${draft?'<button class="outline" id="exportCandidate">导出报告 JSON</button>':''}${artifacts?.pdf_available?'<button class="outline" id="openCandidatePdf">下载已获取的全文 PDF</button>':''}${artifacts?.source_available?'<button class="outline" id="openCandidateSource">查看实际来源文字</button>':''}</div><div class="reader-layout"><nav class="reader-toc" aria-label="阅读目录"><strong>阅读目录</strong>${nav}</nav><div class="reader-content">${parts.map(([id,title,content])=>section(title,content,id)).join('')}<div id="candidateSource"></div>${!state.demo?`<p class="watermark">${esc(state.mode==='direct'?'浏览器 API 研究报告｜未执行 norman-paper-reading 外部技能；原图及公式未视觉核验。':watermark)}</p>`:''}</div></div></article>`;
 }
 function coverageHtml(coverage,artifacts){
   const c=coverage||{};
-  return `<dl><dt>正文来源块</dt><dd>${esc(c.text_blocks_read??'未记录')}</dd><dt>PDF 页数</dt><dd>${esc(c.pdf_pages??'未记录')}</dd><dt>已获取原图页</dt><dd>${esc(artifacts?.image_pages?.join('、')||'详见原图记录')}</dd><dt>已实际核验页</dt><dd>${esc((artifacts?.checked_visual_pages||c.visual_pages_checked||[]).join('、')||'未记录')}</dd><dt>阅读范围</dt><dd>${esc(c.scope||'以已保存阅读记录为准；未推定覆盖全部材料')}</dd></dl>`;
+  return `<dl><dt>正文来源块</dt><dd>${esc(c.text_blocks_read??'未记录')}</dd><dt>PDF 页数</dt><dd>${esc(c.pdf_pages??'未记录')}</dd><dt>已获取原图页</dt><dd>${esc(artifacts?.image_pages?.join('、')||'未取得或未记录')}</dd><dt>已实际核验页</dt><dd>${esc((artifacts?.checked_visual_pages||c.visual_pages_checked||[]).join('、')||'未记录')}</dd><dt>阅读范围</dt><dd>${esc(c.scope||'以已保存阅读记录为准；未推定覆盖全部材料')}</dd></dl>`;
 }
 function renderMath(){if(window.temml)window.temml.renderMathInElement($('modalBody'),{delimiters:[{left:'$$',right:'$$',display:true},{left:'\\[',right:'\\]',display:true},{left:'\\(',right:'\\)',display:false}],throwOnError:false,trust:false});}
 async function loadReaderAssets(base){
@@ -412,8 +415,9 @@ function scopeForm({continueToBatch=false}={}){
   if(!state.project){newProjectForm({continueToBatch});return;}
   if(!requireService())return;
   const project=state.project,scope=project.scope||{},projectId=project.id;
-  showModal('RESEARCH SCOPE · 确认研究范围',(continueToBatch?flowProgress(1):'')+`<h2>${esc(project.name)}</h2><div class="config-status">${scope.inferred?'当前范围由名称推定，请检查后保存。':'当前范围已确认，可继续修改。'}手动编辑不消耗模型 API。</div>${area('科学问题','scopeQuestion',scope.research_question)}${field('检索关键词（逗号分隔）','scopeKeywords',(scope.keywords||[]).join(', '))}${area('纳入范围','scopeInclude',scope.include)}${area('排除范围','scopeExclude',scope.exclude)}<details><summary>参考资料 · 查看或补充 PDF</summary><div id="referenceList" role="status">正在读取资料列表…</div><label class="field">添加范围参考 PDF<input id="scopeReference" type="file" accept="application/pdf,.pdf"><small>${state.mode==='direct'?'在本浏览器提取文字并保存，不上传原文件。仅用于研究范围，不计入论文额度；最多 50 MB、300 页。':'不占精读额度；资料中的文字只作为研究数据处理。'}</small></label><button class="outline" id="uploadReference">保存参考 PDF</button><p id="referenceFeedback" class="upload-feedback" hidden></p></details><p class="form-message" id="formMessage" role="status"></p><p class="reader-meta">「使用模型提取」会发送课题与参考资料给当前 API，产生用量。提取后仍需你确认范围。</p><div class="form-actions"><button class="outline" id="inferScope" ${configurationComplete(state.settings)?'':'disabled'}>使用模型提取范围</button><button class="primary" id="saveScope">${continueToBatch?'保存范围并继续 →':'保存研究范围'}</button></div>${!configurationComplete(state.settings)?'<p class="reader-meta">模型尚未配置。可先手动保存范围，再继续配置模型。</p>':''}`);
+  showModal('RESEARCH CONFIG · 课题配置与范围',(continueToBatch?flowProgress(1):'')+`<h2>${esc(project.name)}</h2><div class="config-status">${scope.inferred?'当前范围由名称推定，请检查后保存。':'当前范围已确认，可继续修改。'}手动编辑不消耗模型 API。</div>${area('核心科学问题','scopeQuestion',scope.research_question||scope.core_question)}${researchConfigFields(scope)}${field('合并检索词（逗号分隔）','scopeKeywords',(scope.keywords||[]).join(', '))}${area('纳入范围','scopeInclude',scope.include)}${area('排除范围','scopeExclude',scope.exclude)}<details><summary>参考资料 · 查看或补充 PDF</summary><div id="referenceList" role="status">正在读取资料列表…</div><label class="field">添加范围参考 PDF<input id="scopeReference" type="file" accept="application/pdf,.pdf"><small>${state.mode==='direct'?'在本浏览器提取文字并保存，不上传原文件。仅用于研究范围，不计入论文额度；最多 50 MB、300 页。':'不占精读额度；资料中的文字只作为研究数据处理。'}</small></label><button class="outline" id="uploadReference">保存参考 PDF</button><p id="referenceFeedback" class="upload-feedback" hidden></p></details><p class="form-message" id="formMessage" role="status"></p><p class="reader-meta">「使用模型提取」会发送课题与参考资料给当前 API，产生用量。提取后仍需你确认范围。</p><div class="form-actions"><button class="outline" id="inferScope" ${configurationComplete(state.settings)?'':'disabled'}>使用模型提取范围</button><button class="primary" id="saveScope">${continueToBatch?'保存范围并继续 →':'保存研究范围'}</button></div>${!configurationComplete(state.settings)?'<p class="reader-meta">模型尚未配置。可先手动保存范围，再继续配置模型。</p>':''}`);
   const current=modalContext();let referenceCoverage=scope.reference_coverage||null;
+  if(state.mode==='direct'&&directApi.storageStatus)directApi.storageStatus().then(status=>{if(current())$('scopeStorageRoot').value=status.selected?'已授权目录：'+status.name+'（浏览器不提供绝对路径）':'尚未绑定主目录 · 浏览器草稿';}).catch(()=>{});
   async function refreshReferences(){
     try{
       const refs=await api(`/api/projects/${projectId}/references`);if(!current())return;
@@ -434,12 +438,15 @@ function scopeForm({continueToBatch=false}={}){
   $('inferScope').onclick=busy(async()=>{
     $('formMessage').textContent='正在读取已保存的参考资料并提取范围…';
     const result=await api(`/api/projects/${projectId}/infer-scope`,{method:'POST'});if(!current())return;
-    $('scopeQuestion').value=result.research_question;$('scopeKeywords').value=(result.keywords||[]).join(', ');$('scopeInclude').value=result.include;$('scopeExclude').value=result.exclude;
+    $('scopeQuestion').value=result.research_question||result.core_question||'';$('scopeKeywords').value=(result.keywords||[]).join(', ');$('scopeInclude').value=result.include;$('scopeExclude').value=result.exclude;
+    if(result.keywords_zh)$('scopeKeywordsZh').value=result.keywords_zh.join(', ');if(result.keywords_en)$('scopeKeywordsEn').value=result.keywords_en.join(', ');
+    if(result.version_differences)$('scopeVersions').value=[$('scopeVersions').value,result.version_differences].filter(Boolean).join('\n');
     referenceCoverage=result.reference_coverage||null;
     $('formMessage').textContent='推定范围已填入，尚未保存。请检查后点击保存。'+(referenceCoverage?.reference_count?`本次使用 ${referenceCoverage.reference_count} 份参考资料，共发送 ${referenceCoverage.characters_sent} 字。${referenceCoverage.truncated?'参考文字较长，部分文字未发送；不表示全文覆盖。':''}`:'');
   },'正在提取研究范围…');
   $('saveScope').onclick=busy(async()=>{
-    const value={research_question:$('scopeQuestion').value.trim(),keywords:$('scopeKeywords').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean),include:$('scopeInclude').value.trim(),exclude:$('scopeExclude').value.trim(),inferred:false};
+    const value={...scope,...readResearchConfigFields(),research_question:$('scopeQuestion').value.trim(),keywords:$('scopeKeywords').value.split(/[,，]/).map(s=>s.trim()).filter(Boolean),include:$('scopeInclude').value.trim(),exclude:$('scopeExclude').value.trim(),inferred:false};
+    value.core_question=value.research_question;value.keywords=[...new Set([...value.keywords,...value.keywords_zh,...value.keywords_en])];
     if(state.mode==='direct'&&referenceCoverage)value.reference_coverage=referenceCoverage;
     if(!value.research_question&&!value.keywords.length)throw new Error('请至少填写科学问题或一个检索关键词。');
     const saved=await api(`/api/projects/${projectId}/scope`,{method:'PUT',body:jsonBody(value)});
@@ -487,7 +494,7 @@ function batchForm(){
   if(!scopeConfirmed(state.project)){scopeForm({continueToBatch:true});return;}
   if(!configurationComplete(state.settings)){settingsForm({continueToBatch:true});return;}
   const project=state.project,scope=project.scope;
-  showModal('NEW BATCH · 运行前确认',flowProgress(3)+`<h2>${state.mode==='direct'?'一次检索，生成文献研究报告':'确认后开始检索与分析'}</h2><p>${esc(project.name)}</p><div class="callout"><strong>本批研究范围</strong><br>${esc(scope.research_question)}<br>关键词：${esc((scope.keywords||[]).join(' · '))}<br>纳入：${esc(scope.include)}<br>排除：${esc(scope.exclude)}</div><label class="field">本批目标数量<input id="batchCount" type="number" min="1" max="20" value="5"><small>允许 1–20；可靠新文献不足时报告缺额，不凑数。</small></label><p>文本模型：${esc(state.settings.text_model)}${state.mode==='direct'?'<br>优先分析可取得的开放全文文字；摘要报告会单独标明。':'<br>视觉模型：'+esc(state.settings.vision_model)}</p><div class="config-status">${state.mode==='direct'?'自动检索、补充摘要并尝试开放全文，逐篇生成总结、研究设计、证据和行动建议。没有可读资料的题录不计入报告；图表和公式单独标注核验缺口。':state.settings.preflight?.ready?'当前配置已有通过的接口检查记录；任务仍会在运行时确认可用性。':'当前配置已保存，任务启动后先进行文本与视觉能力预检。'}</div><div class="callout">${state.mode==='direct'?'启动会产生 API 用量。研究范围、检索题录及实际取得的正文或摘要会直接发送给所配置的模型服务。报告保存在当前浏览器，请保持本页打开；关闭或刷新后任务停止，需手动恢复。':'启动会产生模型 API 用量。课题范围、候选题录、论文正文与原页会发送给当前模型服务。资料保存在私人后端，关闭网页后任务继续。'}</div><p class="form-message" id="formMessage" role="status"></p><div class="form-actions"><button class="outline" id="adjustScope">修改范围</button><button class="outline" id="adjustModels">修改模型</button><button class="primary" id="submitBatch">确认并开始分析 →</button></div>`);
+  showModal('NEW BATCH · 运行前确认',flowProgress(3)+`<h2>${state.mode==='direct'?'一次检索，生成文献研究报告':'确认后开始检索与分析'}</h2><p>${esc(project.name)}</p><div class="callout"><strong>本批研究范围</strong><br>${esc(scope.research_question)}<br>关键词：${esc((scope.keywords||[]).join(' · '))}<br>纳入：${esc(scope.include)}<br>排除：${esc(scope.exclude)}</div><label class="field">本批目标数量<input id="batchCount" type="number" min="1" max="20" value="${Number(scope.default_count)||5}"><small>允许 1–20；可靠新文献不足时报告缺额，不凑数。</small></label><p>文本模型：${esc(state.settings.text_model)}${state.mode==='direct'?'<br>优先分析可取得的开放全文文字；摘要报告会单独标明。':'<br>视觉模型：'+esc(state.settings.vision_model)}</p><div class="config-status">${state.mode==='direct'?'按当前课题配置生成 11 节报告，并综合本批及已有论文的证据、冲突与优先行动。没有可读资料的题录不计报告；图表、公式及外部技能状态如实标注。':state.settings.preflight?.ready?'当前配置已有通过的接口检查记录；任务仍会在运行时确认可用性。':'当前配置已保存，任务启动后先进行文本与视觉能力预检。'}</div><div class="callout">${state.mode==='direct'?'启动会产生 API 用量。课题问题、已填资源与约束、检索题录、实际取得的正文或摘要及用于跨论文综合的已有报告内容会发送给所配置模型服务。报告保存在当前浏览器，请保持本页打开；关闭或刷新后任务停止，需手动恢复。':'启动会产生模型 API 用量。课题配置、候选题录、论文正文与原页及用于跨论文综合的已有报告内容会发送给当前模型服务。资料保存在私人后端，关闭网页后任务继续。'}</div><p class="form-message" id="formMessage" role="status"></p><div class="form-actions"><button class="outline" id="adjustScope">修改范围</button><button class="outline" id="adjustModels">修改模型</button><button class="primary" id="submitBatch">确认并开始分析 →</button></div>`);
   const current=modalContext();$('adjustScope').onclick=()=>scopeForm({continueToBatch:true});$('adjustModels').onclick=()=>settingsForm({continueToBatch:true});
   $('submitBatch').onclick=busy(async()=>{
     const count=Number($('batchCount').value);if(!Number.isInteger(count)||count<1||count>20)throw new Error('数量应为 1–20 的整数。');
@@ -527,6 +534,61 @@ function renderBatchHistory(){
   bindResultActions(panel);
 }
 
+function renderSynthesis(){
+  const panel=$('researchSynthesis'),job=selectedBatch();panel.hidden=state.demo||!job;if(panel.hidden)return;
+  const synthesis=job.checkpoint?.synthesis||{},ready=synthesis.status==='completed',partial=['partial','insufficient_evidence','unavailable'].includes(synthesis.status),opened=$('synthesisDetails')?.open;
+  panel.innerHTML=`<details id="synthesisDetails" ${opened?'open':''}><summary><span>跨论文综合与研究决策</span>${badge(ready?'综合已保存':partial?'部分综合 · 证据不足':activeStatuses.has(job.status)?'本批结束后综合':'综合尚未完成',ready?'neutral':'warning')}</summary><p>比较相互支持与冲突的证据，明确判断变化，并安排 1—3 项最值得先验证的行动。</p>${partial?'<p class="notice">当前综合尚有缺口；保留已有比较和实际原因，不推定为完整证据。</p>':''}${ready||partial?synthesisHtml(synthesis):`<p>${esc(synthesis.error||'尚无已保存综合；不把空白结果当作没有研究冲突。')}</p>`}<div class="form-actions"><button class="outline" id="showResearchBrief">查看当次简报</button><button class="outline" id="refreshSynthesis" ${activeStatuses.has(job.status)?'disabled':''}>${ready||partial?'重新综合现有证据':'综合现有证据'}</button></div></details>`;
+  $('refreshSynthesis').onclick=()=>synthesisForm(job.id);$('showResearchBrief').onclick=()=>showResearchBrief(job.id);
+}
+function synthesisForm(jid){
+  if(!requireService())return;const job=state.jobs.find(j=>j.id===jid);if(!job)return;
+  if(activeStatuses.has(job.status)){toast('当前批次仍在运行，结束后会综合。');return;}
+  showModal('SYNTHESIS · 跨论文综合',`<h2>综合当前课题的已保存证据</h2><p>分析相互支持、冲突原因、判断变化和优先验证行动。依据该批次原始配置，不把后续建议当作已完成工作。</p><div class="callout">将发送课题配置及已保存报告内容至当前模型 API，可能产生用量。此操作不新增论文，不升级原图或公式核验等级。</div><p class="form-message" id="formMessage" role="status"></p><div class="form-actions"><button class="outline" id="cancelSynthesis">返回课题</button><button class="primary" id="confirmSynthesis">${configurationComplete(state.settings)?'确认综合':'先配置模型'}</button></div>`);
+  const current=modalContext();$('cancelSynthesis').onclick=closeModal;
+  $('confirmSynthesis').onclick=busy(async()=>{
+    if(!configurationComplete(state.settings)){settingsForm({onComplete:()=>synthesisForm(jid)});return;}
+    await api(`/api/jobs/${jid}/synthesis`,{method:'POST'});if(!current())return;
+    closeModal();await loadProject();const details=$('synthesisDetails');if(details)details.open=true;toast('综合已更新；研究行动仍为待执行建议。');
+  },'正在综合证据…');
+}
+function briefMarkdown(job){
+  const ids=paperIdsForBatch(job),reused=new Set(job.checkpoint?.reused||[]),papers=reportRecords(),added=papers.filter(p=>(p.batch_id===job.id||ids.has(p.id))&&!reused.has(p.id)),s=job.checkpoint?.synthesis||{};
+  const date=new Date(job.updated_at||job.created_at),day=Number.isNaN(date.valueOf())?'日期未记录':date.toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'});
+  const lines=[`# ${day} · 研究简报`,`课题：${state.project?.name||'未记录'} · ${batchLabel(job)}`,`新增研究报告 ${added.length} 篇，其中完成模型全文核验 ${added.filter(p=>p.analysis?.verified).length} 篇；课题累计 ${papers.length} 篇报告（含未核验记录）。`,`复用不计新增；本批目标新增 ${job.requested} 篇，缺额 ${Math.max(0,job.requested-added.length)} 篇。`,'','## 逐篇概况'];
+  for(const paper of added){const a=displayAnalysis(paper.analysis),r=a.research_logic||{},target=r.reading_priorities?.[0];lines.push(`- ${paper.id} · ${paper.title}：${a.summary||'总结未记录'}`,`  原文：${paper.doi?'https://doi.org/'+paper.doi:paper.url||'未记录'}`,`  值得精读：${target?`${target.locator||'位置待核验'}；${target.reason||'原因待补充'}`:a.reading_list[0]||'待取得关键证据'}`,`  研究启示：${a.future_insights||'未记录'}`,`  未完成：${a.verification_gaps.join('；')||a.verification_status||'核验范围待核对'}`);}
+  if(!added.length)lines.push('本批尚无新增报告，查看检索记录中的实际原因。');
+  lines.push('','## 优先验证的行动（待执行）');
+  const priorities=Array.isArray(s.priority_actions)?s.priority_actions.slice(0,3):[];
+  for(const x of priorities){const paper=papers.find(p=>p.id===x.record_id),action=paper?.analysis?.actions?.find(a=>a.id===x.action_id);lines.push(`- ${x.record_id} / ${x.action_id}：${action?.title||'行动标题待定位'}；${x.reason||'排序依据待核对'}`);}
+  if(!priorities.length)lines.push('尚无有依据的跨论文行动排序；先补证据并完成综合。');
+  lines.push('','## 看板与保存结果',state.mode==='direct'?'当前为在线浏览器研究库；是否写入唯一主目录，请查看顶部「保存目录」实际状态。':`后台主目录：${state.settings.storage_root||state.project?.scope?.storage_root||'由部署者配置'}`,'结构校验通过不等于科学结论已经得到验证。');return lines.join('\n');
+}
+function showResearchBrief(jid){
+  const job=state.jobs.find(j=>j.id===jid);if(!job)return;const text=briefMarkdown(job);
+  showModal('RESEARCH BRIEF · 当次简报',`<h2>${esc(batchLabel(job))} · 研究简报</h2><pre class="research-brief">${esc(text)}</pre><div class="form-actions"><button class="outline" id="downloadBrief">导出这份 Markdown 简报</button></div>`,true);
+  $('downloadBrief').onclick=()=>download(new Blob([text],{type:'text/markdown;charset=utf-8'}),`${job.id.slice(0,8)}-research-brief.md`);
+}
+
+async function storageForm(){
+  if(state.demo){toast('示例不产生长期研究成果。');return;}
+  showModal('STORAGE · 唯一长期保存目录','<h2>研究成果保存位置</h2><p id="storageStatus" role="status">正在读取实际保存状态…</p><p class="form-message" id="formMessage" role="status"></p><div class="form-actions" id="storageActions"></div>');
+  const current=modalContext();
+  try{
+    if(state.mode!=='direct'){$('storageStatus').textContent='私人后台主目录：'+(state.settings.storage_root||state.project?.scope?.storage_root||'由部署者配置 DATA_DIR')+'。所有后台研究资料由部署服务保存，不能在课题表单改写服务器路径。';return;}
+    const status=await directApi.storageStatus();if(!current())return;
+    $('storageStatus').textContent=status.selected?`已选择主目录：${status.name}。${status.path_notice||'浏览器不提供绝对路径。'}${status.needs_reconnect?' 需要重新授权才能读取或写入；不会自动退回旧草稿。':''}`:'尚未绑定长期主目录。当前内容是浏览器草稿。选择目录后，核对并保存当前研究库，再以该目录为唯一正式来源。';
+    if(status.warning)$('formMessage').textContent=status.warning;
+    $('storageActions').innerHTML=status.supported?'<button class="primary" id="chooseResearchDirectory">选择并授权主目录</button>':'<p>当前浏览器不提供目录授权。请使用支持该功能的浏览器，或通过私人后台配置主目录；也可按需手动导出。</p>';
+    $('chooseResearchDirectory')?.addEventListener('click',busy(async()=>{
+      if(state.activeJob)throw new Error('先停止当前任务并等待保存完成，再切换主目录。');
+      const saved=await directApi.selectDirectory({onProgress:progress=>{if(current())$('storageStatus').textContent=typeof progress==='string'?progress:progress.message||'正在核对并保存研究库…';}});
+      if(!current())return;await loadWorkspace();$('storageStatus').textContent=`主目录已绑定：${saved?.name||'已选择目录'}。以后保存以此目录为准；原始论文或原图是否实际取得，以每份来源记录为准。`;
+      if(saved?.warning)$('formMessage').textContent=saved.warning;
+      toast('研究库已保存到所选主目录。');
+    },'正在绑定主目录…'));
+  }catch(error){if(current())modalError(error);}
+}
+
 function deleteProjectForm(pid=state.project?.id){
   if(state.demo){toast('合成示例不需要删除。');return;}
   const project=state.projects.find(p=>p.id===pid);if(!project)return;
@@ -553,6 +615,7 @@ $('projectSelect').onchange=()=>selectProject($('projectSelect').value);
 $('connect').onclick=connectionForm;$('settings').onclick=()=>state.demo?connectionForm():settingsForm();$('newProject').onclick=newProjectForm;$('newBatch').onclick=()=>state.nav==='home'?newProjectForm():batchForm();$('editScope').onclick=scopeForm;
 $('topSettings').onclick=()=>state.demo?connectionForm():settingsForm();
 $('directSettings').onclick=()=>directConnectionForm();
+$('storageButton').onclick=()=>storageForm();
 $('switchProject').onclick=goHome;
 $('deleteProject').onclick=()=>deleteProjectForm();
 $('clearFilters').onclick=clearFilters;

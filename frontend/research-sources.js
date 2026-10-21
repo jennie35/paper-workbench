@@ -19,13 +19,14 @@ export function openAlexPaper(item) {
   if(!title||!/^10\.\d{4,9}\/\S+$/i.test(doi))return null;
   const locations=[item.best_oa_location,item.primary_location,...(Array.isArray(item.locations)?item.locations:[])].filter(Boolean);
   const published=locations.some(x=>x.is_published===true||x.version==='publishedVersion');
-  return {title,doi,authors:(Array.isArray(item.authorships)?item.authorships:[]).map(x=>plain(x.author?.display_name)).filter(Boolean),year:Number.isInteger(item.publication_year)?item.publication_year:null,publication_date:plain(item.publication_date),journal:plain(item.primary_location?.source?.display_name),url:'https://doi.org/'+encodeURI(doi),abstract:abstractFromIndex(item.abstract_inverted_index),abstract_source:'OpenAlex',publication_status:item.type==='preprint'?'preprint':published?'published':'unknown',versions:[doi],source:'OpenAlex',status:'pending',pdf_urls:[...new Set(locations.filter(x=>x.is_oa===true).map(x=>publicDocumentUrl(x.pdf_url)).filter(Boolean))].slice(0,3)};
+  return {title,doi,authors:(Array.isArray(item.authorships)?item.authorships:[]).map(x=>plain(x.author?.display_name)).filter(Boolean),year:Number.isInteger(item.publication_year)?item.publication_year:null,publication_date:plain(item.publication_date),volume:plain(item.biblio?.volume),issue:plain(item.biblio?.issue),pages:[plain(item.biblio?.first_page),plain(item.biblio?.last_page)].filter(Boolean).join('–'),publication_date_source:'OpenAlex publication_date；首次发表时间仍需核对出版记录',journal:plain(item.primary_location?.source?.display_name),url:'https://doi.org/'+encodeURI(doi),abstract:abstractFromIndex(item.abstract_inverted_index),abstract_source:'OpenAlex',publication_status:item.type==='preprint'?'preprint':published?'published':'unknown',versions:[doi],source:'OpenAlex',status:'pending',pdf_urls:[...new Set(locations.filter(x=>x.is_oa===true).map(x=>publicDocumentUrl(x.pdf_url)).filter(Boolean))].slice(0,3)};
 }
 export function mergeSourcePaper(existing,incoming) {
   if(!existing.abstract&&incoming.abstract){existing.abstract=incoming.abstract;existing.abstract_source=incoming.abstract_source||incoming.source;}
   existing.pdf_urls=[...new Set([...(existing.pdf_urls||[]),...(incoming.pdf_urls||[])])].slice(0,3);
   existing.sources=[...new Set([...(existing.sources||[existing.source]),incoming.source])];
   existing.versions=[...new Set([...(existing.versions||[]),...(incoming.versions||[])])];
+  for(const key of ['volume','issue','pages'])if(!existing[key]&&incoming[key])existing[key]=incoming[key];
   if(existing.publication_status==='unknown'&&incoming.publication_status!=='unknown')existing.publication_status=incoming.publication_status;
 }
 function textIdentity(extracted,paper) {

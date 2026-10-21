@@ -155,10 +155,11 @@ def test_success_and_retry_do_not_duplicate(monkeypatch):
         assert len(s.scalars(select(Paper)).all())==1
 
 
-def test_analysis_pipeline_inspects_and_reconciles_originals():
+@pytest.mark.parametrize('omit_reconciled_logic', [False, True])
+def test_analysis_pipeline_inspects_and_reconciles_originals(omit_reconciled_logic):
     from app.pipeline import analyze
     from app.artifacts import challenge_image
-    folder=DATA/'papers'/'end-to-end-fixture';folder.mkdir(parents=True,exist_ok=True)
+    folder=DATA/'papers'/('end-to-end-fixture-' + str(omit_reconciled_logic));folder.mkdir(parents=True,exist_ok=True)
     make_pdf(folder/'paper.pdf')
     class LocalSkill:
         def instructions(self):
@@ -187,8 +188,17 @@ def test_analysis_pipeline_inspects_and_reconciles_originals():
             a=analysis();a['required_visual_pages']=[1]
             if '修正此前文本分析' in prompt:
                 self.reconciled=True;a['summary']='Reconciled after actual image request'
+                if omit_reconciled_logic:
+                    a.pop('research_logic', None)
             return a
     model=Model();stages=[]
+    if omit_reconciled_logic:
+        with pytest.raises(ValueError, match='原图复核后的分析缺少课题研究逻辑'):
+            analyze(model,LocalSkill(),metadata(),{'question':'Fixture'},folder,stages.append)
+        partial=json.loads((folder/'provisional.json').read_text('utf-8'))
+        assert partial['verified'] is False
+        assert not (folder/'analysis.json').exists()
+        return
     result=analyze(model,LocalSkill(),metadata(),{'question':'Fixture'},folder,stages.append)
     assert model.reconciled
     assert result['verified'] is True

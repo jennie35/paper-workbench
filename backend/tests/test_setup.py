@@ -27,7 +27,8 @@ def test_setup_status_requires_auth_and_exposes_only_readiness(client):
 
 
 def test_unconfigured_readiness_is_explicit(logged):
-    assert logged.get('/api/settings').json() == {'configured': False, 'preflight': {'ready': False, 'checked_at': None}}
+    from app.config import DATA
+    assert logged.get('/api/settings').json() == {'configured': False, 'preflight': {'ready': False, 'checked_at': None}, 'storage_root': str(DATA.resolve())}
     assert logged.post('/api/preflight').status_code == 400
 
 

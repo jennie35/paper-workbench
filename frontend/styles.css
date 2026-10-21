@@ -561,6 +561,22 @@ button[aria-busy="true"]:disabled, button.is-loading:disabled { opacity: .8; }
 .reference-records summary { cursor:pointer; color:var(--green); font-size:11px; }
 .reference-records pre { padding:12px; max-height:260px; overflow:auto; background:#f6f8f2; border:1px solid var(--line); border-radius:6px; white-space:pre-wrap; font:inherit; font-size:11px; line-height:1.8; }
 .reference-warning { margin:5px 0; font-size:11px; color:#927649; }
+dialog:has(.research-config) { max-width:880px; }
+.research-config { margin:18px 0; padding:15px; border:1px solid var(--line); border-radius:8px; background:#fafbf8; }
+.research-config > summary { color:var(--green); font-size:13px; cursor:pointer; font-weight:600; }
+.config-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); column-gap:18px; }
+.config-grid .field { margin:11px 0; }
+.config-grid textarea { min-height:80px; }
+.research-synthesis { margin:0 0 24px; border:1px solid #dce5d5; border-radius:10px; background:#fff; padding:16px 20px; color:#53674d; font-size:12px; }
+.research-synthesis > details > summary { cursor:pointer; display:flex; align-items:center; justify-content:space-between; gap:15px; font-size:14px; font-weight:500; }
+.research-synthesis p { line-height:1.9; }
+.research-synthesis h3 { font-size:14px; margin:22px 0 9px; }
+.research-synthesis dl { display:grid; grid-template-columns:120px 1fr; gap:8px 16px; font-size:12px; }
+.research-synthesis dd { margin:0; white-space:pre-wrap; }
+.synthesis-item, .synthesis-action { padding:14px 0; border-bottom:1px solid #edf0e8; }
+.synthesis-action > .tag { margin-left:8px; }
+.research-brief { white-space:pre-wrap; font:13px/1.9 "Segoe UI","Microsoft YaHei",sans-serif; color:#435c42; overflow-wrap:anywhere; }
+@media(max-width:600px){.config-grid{grid-template-columns:minmax(0,1fr)}.research-synthesis{padding:14px}.research-synthesis>details>summary{flex-wrap:wrap;gap:8px}.research-synthesis dl{grid-template-columns:85px minmax(0,1fr);gap:7px}#storageButton{display:inline-block!important}.top-actions{gap:4px}}
 .topic-actions { display:flex; flex-wrap:wrap; gap:6px; justify-content:flex-end; }
 .danger-text { color:#9c5144; }
 .danger-button { background:#984a38; color:white; padding:10px 17px; border-radius:7px; }

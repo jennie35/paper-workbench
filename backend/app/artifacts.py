@@ -5,6 +5,8 @@ import json
 import re
 import zipfile
 import os
+import datetime as dt
+import uuid
 from pathlib import Path
 
 from markdown_it import MarkdownIt
@@ -78,28 +80,96 @@ def evidence_bundle(meta, analysis, source_map):
         claims.append({'id': cid, 'statement': e['claim'], 'origin': e.get('origin', 'analyst_inference'), 'caveat': e['limits']})
         evidence.append({'id': e['id'], 'kind': 'text', 'locator': '; '.join(str(blocks[x].get('locator') or ('PDF p.' + str(blocks[x].get('page', '?')))) for x in e['source_block_ids']), 'source_ids': e['source_block_ids'], 'observation': e['observation'], 'inspection': 'verified'})
         links.append({'claim_id': cid, 'evidence_id': e['id'], 'relation': 'supports', 'strength': 'uncertain', 'rationale': e['interpretation']})
-    return {'schema_version': 1, 'paper': {'title': meta['title'], 'url': meta.get('url', ''), 'version': meta.get('publication_status', 'unknown'), 'source_sha256': analysis.get('source_sha256', ''), 'scope': analysis.get('coverage', {})}, 'claims': claims, 'evidence': evidence, 'links': links, 'branches': [], 'action_status':analysis.get('action_status',''), 'actions': [dict(id=a['id'], gap=a['gap'], question=a['title'], hypothesis=a['hypothesis'], method=a['method'], controls=a['controls'], decision_rule='支持：'+a['supporting']+'；削弱：'+a['weakening'], resources=a['resources'], feasibility='requires_resources', evidence_ids=a['evidence_ids'], priority=a['priority'], deliverable=a['deliverable']) for a in analysis['actions']]}
+    result = {'schema_version': 1, 'paper': {'title': meta['title'], 'url': meta.get('url', ''), 'version': meta.get('publication_status', 'unknown'), 'source_sha256': analysis.get('source_sha256', ''), 'scope': analysis.get('coverage', {})}, 'claims': claims, 'evidence': evidence, 'links': links, 'branches': [], 'action_status':analysis.get('action_status',''), 'actions': [dict(id=a['id'], gap=a['gap'], question=a['title'], hypothesis=a['hypothesis'], method=a['method'], controls=a['controls'], decision_rule='支持：'+a['supporting']+'；削弱：'+a['weakening'], resources=a['resources'], feasibility='requires_resources', evidence_ids=a['evidence_ids'], priority=a['priority'], deliverable=a['deliverable']) for a in analysis['actions']]}
+
+
+    result['research_logic'] = analysis.get('research_logic')
+    for key in ('doi', 'authors', 'journal', 'first_publication_date',
+                'first_publication_date_status', 'publication_date',
+                'publication_date_status', 'publication_date_precision',
+                'publication_dates', 'online_date', 'print_date', 'year',
+                'issue_year', 'volume', 'issue', 'pages', 'article_number',
+                'publication_status', 'versions', 'source'):
+        if key in meta:
+            result['paper'][key] = meta[key]
+    result['paper']['source_version'] = analysis.get('source_version', '未核验')
+    result['project_context'] = analysis.get('project_context') or {
+        'scope_snapshot': None,
+        'notice': '旧记录未保留阅读时的课题配置，不推定其条件等于当前配置'}
+    result['verification_status'] = analysis.get('verification_status', 'unverified')
+    result['actions'] = [dict(a, question=a.get('question') or a['title'],
+                              decision_rule='支持：' + a['supporting'] + '；削弱：' + a['weakening'],
+                              feasibility='requires_resources', status='pending') for a in analysis['actions']]
+    return result
 
 
 def markdown_note(meta, a):
-    text = [f'# {meta["title"]}', '', f'> extend · DOI: {meta.get("doi", "未提供")} · 来源: {meta.get("url", "未提供")}', '', '## 论文总结', a['summary'], '## 科学问题', a['scientific_question'], '## 阅读范围与核验状态', json.dumps(a.get('coverage', {}), ensure_ascii=False), a.get('verification_status', '未核验'), '## 完整研究脉络', '### 作者结论', a['author_conclusions'], '### 分析者推断', a['analyst_inference'], '## 分析者绘制的研究流程', '![分析者绘制，非原论文图](assets/research-flow.svg)', '## 关键设计与研究重建']
-    for key, label in [('variables','变量'),('samples','样本'),('equipment','设备'),('parameters','参数'),('controls','对照'),('repeats','独立重复'),('statistics','统计单位与分析')]:
+    logic = a.get('research_logic') or {}
+    def value(item):
+        return json.dumps(item, ensure_ascii=False) if isinstance(item, (dict, list)) else str(item)
+    def fields(items, labels=None):
+        for key, item in items.items():
+            text.append('**' + (labels or {}).get(key, key) + '**：' + value(item))
+    text = [f'# {meta["title"]}', '', '## 1. 题录与阅读范围',
+            '> extend · DOI: ' + str(meta.get('doi') or '未提供') + ' · 来源: ' + str(meta.get('url') or '未提供')]
+    fields({k: meta.get(k, '未核验') for k in ('authors', 'journal', 'first_publication_date', 'first_publication_date_status', 'publication_date', 'publication_dates', 'year', 'volume', 'issue', 'pages', 'publication_status', 'versions')},
+           {'authors':'作者', 'journal':'期刊或会议', 'first_publication_date':'来源记录中最早发表日期（未知时不推定）', 'first_publication_date_status':'首次发表日期来源边界', 'publication_date':'已知发表日期（保留核实精度）', 'publication_dates':'来源提供的在线和印刷日期差异', 'year':'卷期年份', 'volume':'卷', 'issue':'期', 'pages':'页码', 'publication_status':'发表状态', 'versions':'版本关系'})
+    text.extend(['分析日期：' + a.get('analyzed_date', '未记录'), '### 阅读范围与核验状态',
+                 value(logic.get('reading_scope', a.get('coverage', {}))), a.get('verification_status', '未核验'),
+                 '结构校验通过不证明科学结论成立；研究行动均为待执行建议。'])
+    context = a.get('project_context')
+    if context:
+        text.extend(['### 本次阅读时的课题配置', value(context),
+                     '此配置是分析时的条件快照；后续修改课题配置不会追溯改变原始报告。'])
+    else:
+        text.append('阅读时的课题配置未记录；不推定原始条件等于当前配置。')
+    text.extend(['## 2. 论文总结', a['summary'], '## 3. 科学问题与研究主线', a['scientific_question']])
+    if logic.get('storyline'):
+        fields(logic['storyline'], {'author_question':'作者明确的问题', 'reconstructed_question':'分析者重建的问题', 'gap':'既有方法缺口', 'hypothesis':'核心假设', 'reasoning':'问题到结论的推理链'})
+    text.extend(['## 4. 研究流程示意', '![分析者绘制，非论文原图](assets/research-flow.svg)',
+                 '## 5. 重建研究设计'])
+    design = logic.get('study_design') or {}
+    text.append('论文类型：' + design.get('type', 'unknown'))
+    fields(design.get('fields') or {})
+    for key, label in [('variables','变量'),('samples','样本'),('equipment','设备'),('parameters','参数'),('controls','对照'),('repeats','独立重复'),('statistics','统计单位与方法')]:
         text.extend(['### ' + label, a[key]])
-    text.append('## 原图、表与必要公式核验')
+    text.append('## 6. 关键设计决策')
+    for i, decision in enumerate(logic.get('design_decisions', []), 1):
+        text.append('### D' + str(i).zfill(2))
+        fields(decision, {'decision':'作者选择', 'problem':'解决的问题', 'rationale':'选择理由', 'rationale_origin':'理由来源', 'cost':'引入的代价', 'alternative':'合理替代', 'source_block_ids':'来源块'})
+    if not logic.get('design_decisions'):
+        text.append('本记录尚未单独核验设计决策，不能推定作者动机。')
+    text.append('## 7. 精选原图、表格与公式核验')
     for v in a.get('visuals', []):
-        text.extend(['### ' + v['label'], f'![原始整页，保留上下文](assets/page-{v["page"]}.png)', f'来源：PDF第 {v["page"]} 页；{v["kind"]}；原始整页可能包含相邻图表。', v['explanation'], '局限：' + v['limitations']])
-    text.append('## 证据卡')
+        text.extend(['### ' + v['label'], f'![原始整页，保留上下文](assets/page-{v["page"]}.png)',
+                     f'来源：PDF第 {v["page"]} 页；{v["kind"]}；原始整页可能包含相邻图表。',
+                     v['explanation'], '局限：' + v['limitations']])
+    for review in logic.get('evidence_review', []):
+        fields(review, {'kind':'证据类型', 'locator':'原文定位', 'claim':'支持的结论', 'comparison':'比较对象与面板', 'axes_units':'坐标与单位', 'statistical_unit':'统计单位', 'uncertainty':'效应与不确定性', 'consistency':'正文图注公式一致性', 'verification_status':'该条核验状态', 'source_block_ids':'来源块'})
+    if not a.get('visuals'):
+        text.append('未保存已实际查看的原图记录；取得或渲染图片不等于目视核验。')
+    text.extend(['## 8. 结论、证据与局限', '### 作者报告的结果与解释', a['author_conclusions'], '### 分析者判断或推断', a['analyst_inference']])
+    fields(logic.get('conclusion_layers') or {}, {'author_results':'作者报告的结果', 'author_interpretation':'作者解释', 'analyst_inference':'分析者推断', 'unverified_hypotheses':'尚待验证的假设'})
     for e in a['evidence']:
-        text.extend(['### ' + e['id'], e['claim'], '观察：'+e['observation'], '定位：'+', '.join(e['source_block_ids']), '解释：'+e['interpretation'], '边界：'+e['limits']])
-    text.extend(['## 待精读清单'] + ['- ' + x for x in a['reading_list']])
-    text.extend(['## 未读与未核验材料'] + ['- ' + x for x in a.get('unread', [])])
-    text.extend(['## 未来研究启示', a['future_insights'], '## 迁移条件', a['transfer_conditions'], '## 复现检查清单'] + ['- ' + x for x in a['reproduction_checklist']])
-    text.append('## 研究行动卡（待执行）')
+        text.extend(['### ' + e['id'], e['claim'], '性质：' + e.get('origin', 'analyst_inference'),
+                     '观察：'+e['observation'], '定位：'+', '.join(e['source_block_ids']), '解释：'+e['interpretation'], '边界：'+e['limits']])
+    for pitfall in logic.get('pitfalls', []):
+        text.append('检查：' + pitfall['kind'] + '；' + pitfall['assessment'] + '；来源：' + ', '.join(pitfall.get('source_block_ids', [])))
+    text.extend(['### 未读与未核验材料'] + ['- ' + x for x in a.get('unread', [])])
+    text.append('## 9. 需要重点精读的部分')
+    for priority in logic.get('reading_priorities', []):
+        fields(priority, {'kind':'类型', 'locator':'具体位置', 'reason':'精读原因', 'decision_impact':'影响的研究判断', 'source_block_ids':'来源块'})
+    text.extend(['- ' + x for x in a['reading_list']])
+    text.extend(['## 10. 未来研究启示', a['future_insights'], '### 迁移条件', a['transfer_conditions']])
+    fields(logic.get('transfer_insights') or {}, {'direct':'可以直接借鉴', 'adapt':'需要修改后验证', 'avoid':'目前不宜迁移', 'judgement_change':'本课题判断如何改变'})
+    text.extend(['## 11. 下一步研究规划与行动卡', '### 复现检查清单'] + ['- ' + x for x in a['reproduction_checklist']])
     for action in a['actions']:
-        text.extend(['### ' + action['id'] + ' ' + action['title']])
-        for key, label in [('evidence_ids','证据'),('gap','缺口'),('hypothesis','假设'),('method','方法'),('controls','对照'),('supporting','支持方向'),('weakening','削弱方向'),('resources','资源'),('priority','优先级'),('deliverable','交付成果'),('sample_size_basis','样本量与阈值依据')]:
-            text.append(f'**{label}**：' + (', '.join(action[key]) if isinstance(action[key], list) else action[key]))
-    text.extend(['## 优先研究路线图', a['roadmap'], '## 来源与阅读记录'] + ['- ' + x for x in a['sources']])
+        text.extend(['### ' + action['id'] + ' ' + action['title'] + '（待执行）'])
+        for key, label in [('evidence_ids','证据'),('gap','缺口'),('question','待回答问题'),('hypothesis','可被否定的假设'),('method','方法'),('data','数据'),('experimental_unit','独立实验单位'),('controls','基线与对照'),('confounds','混杂控制'),('supporting','支持方向'),('weakening','否定或削弱方向'),('criteria_basis','判断依据'),('resources','已知或缺少资源'),('prerequisites','前置条件'),('priority','优先级'),('deliverable','交付成果'),('sample_size_basis','样本量与阈值依据'),('stopping_criteria','停止条件')]:
+            text.append(f'**{label}**：' + value(action.get(key, '未报告；执行前须明确')))
+    if not a['actions']:
+        text.append(a.get('action_status', '证据不足，须先补齐资料。'))
+    text.extend(['### 优先研究路线图', a['roadmap'], '### 来源与阅读记录'] + ['- ' + x for x in a['sources']])
     text.extend(['', WATERMARK.replace('\n', '  \n')])
     return '\n\n'.join(text) + '\n'
 
@@ -111,6 +181,56 @@ def write_artifacts(folder, meta, analysis, source_map):
     (folder / 'reading-note.md').write_text(markdown_note(meta, analysis), 'utf-8')
     (folder / 'evidence.json').write_text(json.dumps(evidence_bundle(meta, analysis, source_map), ensure_ascii=False, indent=2), 'utf-8')
     (folder / 'analysis.json').write_text(json.dumps(analysis, ensure_ascii=False, indent=2), 'utf-8')
+
+
+def write_record_index(data_root, number, meta, analysis, *, on_created=None):
+    """Dated note/evidence views reference one canonical PDF/image set in DATA.
+
+    Prepare inside DATA and promote only a complete view. Never overwrite an
+    existing different source or delete a canonical source while indexing.
+    """
+    root = Path(data_root).resolve()
+    canonical = (root / analysis.get('artifact_dir', '')).resolve()
+    if not analysis.get('artifact_dir') or not canonical.is_relative_to(root) or canonical == root:
+        return None
+    if not (canonical / 'reading-note.md').is_file() or not (canonical / 'evidence.json').is_file():
+        return None
+    date = str(analysis.get('analyzed_date') or dt.datetime.now(dt.timezone.utc).date().isoformat())
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', date):
+        raise ValueError('分析日期无效，不能建立长期目录')
+    day = dt.date.fromisoformat(date).isoformat()
+    final = root / day / f'R{number:03d}'
+    if final.resolve() != final or not final.resolve().is_relative_to(root):
+        raise ValueError('长期记录目录必须位于配置主目录内')
+    manifest = {'schema_version': 1, 'paper_id': f'R{number:03d}', 'doi': meta.get('doi', ''),
+                'source_sha256': analysis.get('source_sha256', ''),
+                'canonical_artifact_dir': canonical.relative_to(root).as_posix(),
+                'notice': '此目录是主目录内的日期视图；PDF、来源映射和原图仅在 canonical_artifact_dir 保存一份。'}
+    if final.exists():
+        saved = json.loads((final / 'record.json').read_text('utf-8'))
+        if any(saved.get(k) != manifest[k] for k in ('doi', 'source_sha256', 'canonical_artifact_dir')):
+            raise ValueError('长期记录目录已有不同来源，已保留旧版；请检查台账后恢复')
+        return final.relative_to(root).as_posix()
+    stage = root / '.staging' / ('record-' + uuid.uuid4().hex)
+    if stage.resolve() != stage or not stage.resolve().is_relative_to(root):
+        raise ValueError('临时目录必须位于配置主目录内')
+    (stage / 'source').mkdir(parents=True)
+    (stage / 'assets').mkdir()
+    relative = Path(os.path.relpath(canonical, final)).as_posix()
+    note = (canonical / 'reading-note.md').read_text('utf-8').replace('](assets/', '](' + relative + '/assets/')
+    (stage / 'reading-note.md').write_text(note, 'utf-8')
+    (stage / 'evidence.json').write_bytes((canonical / 'evidence.json').read_bytes())
+    (stage / 'record.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2), 'utf-8')
+    for kind in ('source', 'assets'):
+        pointer = {'relative_path': relative + '/' + kind, 'canonical_artifact_dir': manifest['canonical_artifact_dir']}
+        if kind == 'source':
+            pointer.update(original_pdf=relative + '/paper.pdf', source_map=relative + '/source/source_map.json')
+        (stage / kind / 'reference.json').write_text(json.dumps(pointer, ensure_ascii=False), 'utf-8')
+    final.parent.mkdir(parents=True, exist_ok=True)
+    stage.rename(final)
+    if on_created:
+        on_created(final)
+    return final.relative_to(root).as_posix()
 
 
 def rendered_note(markdown):
@@ -127,9 +247,12 @@ def rendered_note(markdown):
     return md.render(markdown)
 
 
-def export_zip(papers, kind, data_root):
+def export_zip(papers, kind, data_root, *, bundle=None):
     """One source note/evidence set feeds all exports. No credentials or PDFs."""
     stream = io.BytesIO()
+    from .exporting import clean_export, offline_index, project_markdown
+    bundle = clean_export(bundle or {'schema_version': 2, 'project': {'name': '研究文献库'},
+                                    'papers': papers, 'jobs': [], 'references': []})
     with zipfile.ZipFile(stream, 'w', zipfile.ZIP_DEFLATED) as z:
         frontend = Path(os.getenv('FRONTEND_DIR', str(Path(__file__).resolve().parents[2] / 'frontend')))
         math_ready = kind == 'html' and (frontend / 'vendor/temml.min.js').is_file()
@@ -158,10 +281,9 @@ def export_zip(papers, kind, data_root):
                 if path.suffix in ('.png', '.svg'):
                     z.write(path, prefix + '/assets/' + path.name)
             index.append(f'<li><a href="{prefix}/index.html">{html.escape(p["title"])}</a></li>')
-        clean = json.loads(json.dumps(papers))
-        for p in clean:
-            p['analysis'].pop('artifact_dir', None)
-        z.writestr('papers.json', json.dumps(clean, ensure_ascii=False, indent=2))
+        z.writestr('papers.json', json.dumps(clean_export(papers), ensure_ascii=False, indent=2))
+        z.writestr('research.json', json.dumps(bundle, ensure_ascii=False, indent=2))
+        z.writestr('project.md', project_markdown(bundle))
         if kind == 'html':
-            z.writestr('index.html', '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>研究文献库</title><h1>研究文献库</h1><p>私人导出 · 研究行动均为待执行方案</p><ul>'+''.join(index)+'</ul></html>')
+            z.writestr('index.html', offline_index(bundle))
     return stream.getvalue()

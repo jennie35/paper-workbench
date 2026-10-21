@@ -26,7 +26,9 @@ def test_project_scope_validation(logged):
     p = logged.post('/api/projects',json={'name':'General ecology','goal':'Independent project'}).json()
     assert p['scope']['inferred'] is True
     scope = {'research_question':'Question','keywords':['ecology'],'include':'Field studies','exclude':'Unrelated','inferred':False}
-    assert logged.put(f'/api/projects/{p["id"]}/scope',json=scope).json()['scope'] == scope
+    saved = logged.put(f'/api/projects/{p["id"]}/scope',json=scope).json()['scope']
+    assert {key: saved[key] for key in scope} == scope
+    assert saved['core_question'] == 'Question' and saved['default_count'] == 5
     assert logged.get('/api/projects').json()[0]['name'] == 'General ecology'
     assert logged.post('/api/projects',json={'name':''}).status_code == 422
 
