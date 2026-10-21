@@ -1,0 +1,20 @@
+{
+  "project_name": "",
+  "research_question": "",
+  "research_stage": "exploration",
+  "research_object": "",
+  "application_context": "",
+  "existing_methods": "",
+  "known_resources": "",
+  "constraints": "",
+  "reference_materials": [],
+  "version_differences": [],
+  "keywords_zh": [],
+  "keywords_en": [],
+  "include": [],
+  "exclude": [],
+  "default_count": 5,
+  "storage_root": "",
+  "output_language": "zh-CN",
+  "run_mode": "manual"
+}

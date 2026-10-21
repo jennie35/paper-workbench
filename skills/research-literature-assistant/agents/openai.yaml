@@ -1,0 +1,4 @@
+interface:
+  display_name: "课题文献研究助手"
+  short_description: "持续检索与去重，重建科学问题、研究设计和证据，形成可检验研究行动"
+  default_prompt: "使用 $research-literature-assistant，读取我的课题配置，检索尚未分析的相关文献并更新研究笔记、证据台账与离线看板。"

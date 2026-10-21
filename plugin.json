@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "paper-workbench-research",
+  "version": "0.1.0",
+  "description": "Topic-based literature discovery, traceable research reading, evidence synthesis and local research workspaces."
+}

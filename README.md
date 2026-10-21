@@ -8,6 +8,10 @@
 
 ![界面预览](docs/preview-desktop.jpg)
 
+## 作为科研助手 Skill 使用
+
+现提供独立技能 [`research-literature-assistant`](skills/research-literature-assistant/)，将课题配置、持续检索去重、十一节研究报告、跨论文综合、可检验行动与离线台账组织为可复用工作流。无需运行网页后台；第三方 `norman-paper-reading` 可选并由使用者另行安装，不随仓库分发。[安装、目录布置及调用示例](docs/SKILL.md)。技能源码公开，私人课题和研究成果保存在使用者指定的主目录，安装不会自动启动检索或定时任务。
+
 ## 直接在在线网页使用
 
 打开[在线看板](https://jennie35.github.io/paper-workbench/)，选择默认的「API 直连」，填写供应商的 HTTPS API 基础地址、API 密钥和准确的文本模型名。可尝试获取供应商模型列表，也可手动填写模型名。DeepSeek 官方基础地址为 `https://api.deepseek.com`；模型名以当前供应商提供的列表为准，不由密钥自动选择。
