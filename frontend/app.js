@@ -113,7 +113,7 @@ function reportRecords(){
   const papers=[...state.papers],knownIds=new Set(papers.map(p=>p.id)),knownIdentity=new Set(papers.map(p=>p.doi?.toLowerCase()||p.title));
   for(const job of state.jobs)for(const [index,item] of (job.checkpoint?.candidates||[]).entries()){
     const identity=item.doi?.toLowerCase()||item.title;
-    if(!hasReport(item.analysis)||knownIds.has(item.paper_id)||knownIdentity.has(identity))continue;
+    if(['duplicate','reused','excluded'].includes(item.status)||!hasReport(item.analysis)||knownIds.has(item.paper_id)||knownIdentity.has(identity))continue;
     papers.push({...item,id:item.paper_id||`candidate-${job.id}-${index}`,batch_id:job.id,analysis:item.analysis,_candidateJob:job.id,_candidateIndex:index});knownIdentity.add(identity);
   }
   return papers;

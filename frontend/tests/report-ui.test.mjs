@@ -17,7 +17,7 @@ test('application boots against current HTML IDs without removed navigation cont
 });
 
 test('saved candidate analyses become visible report records without duplicating registered papers',()=>{
-  const state={papers:[{id:'D001',doi:'10.1234/a',analysis:{summary:'a'}}],jobs:[{id:'first',checkpoint:{candidates:[{paper_id:'D001',doi:'10.1234/a',analysis:{summary:'duplicate'}},{doi:'10.1234/b',analysis:{summary:'b'}},{doi:'10.1234/c'}]}},{id:'second',checkpoint:{candidates:[{doi:'10.1234/d',analysis:{summary:'d'}}]}}]};
+  const state={papers:[{id:'D001',doi:'10.1234/a',analysis:{summary:'a'}}],jobs:[{id:'first',checkpoint:{candidates:[{paper_id:'D001',doi:'10.1234/a',analysis:{summary:'duplicate'}},{doi:'10.1234/b',analysis:{summary:'b'}},{doi:'10.1234/c'},{doi:'10.1234/existing-elsewhere',status:'duplicate',analysis:{summary:'Not a new report after final identity check'}}]}},{id:'second',checkpoint:{candidates:[{doi:'10.1234/d',analysis:{summary:'d'}}]}}]};
   const context=vm.createContext({state});vm.runInContext(extract('function reportRecords(){','function badge('),context);
   const papers=context.reportRecords();assert.equal(papers.length,3);assert.deepEqual(Array.from(papers,p=>p.analysis.summary),['a','b','d']);assert.equal(new Set(papers.map(p=>p.id)).size,3);assert.equal(papers[1]._candidateJob,'first');
 });
