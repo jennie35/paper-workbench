@@ -1,58 +1,20 @@
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data: file:; connect-src 'none'; base-uri 'none'; form-action 'none'"><title>技能衍生离线看板 · 合成演示 · 文献研究</title><style>
-:root{color-scheme:light;font:16px/1.65 system-ui,sans-serif;color:#20312e;background:#f3f5f2}body{max-width:1100px;margin:auto;padding:28px}h1{font-size:2rem;line-height:1.2}h2{font-size:1.35rem}header p{color:#5b6863}nav,.filters{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0}button,input,select{font:inherit;border:1px solid #c5d1ca;border-radius:8px;padding:8px 12px;background:white}button[aria-pressed=true]{background:#215f4b;color:white}input[type=search]{flex:1;min-width:180px}article{border:1px solid #d9e0da;border-radius:14px;background:white;padding:22px;margin:16px 0}.badge{font-size:.8rem;background:#e5eee7;padding:3px 7px;border-radius:5px}article header>span+span{margin-left:10px;font-size:.85rem}a{color:#145d70}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}summary{cursor:pointer}img{max-width:100%;max-height:650px}dl{display:grid;grid-template-columns:7em 1fr}dd{margin:0}.selected,.actions{display:none}body[data-view=evidence] .selected,body[data-view=actions] .actions{display:block}body[data-view=evidence] .reading,body[data-view=actions] .reading{display:none}[hidden]{display:none!important}footer{font-size:.85rem;color:#61706a}@media(max-width:600px){body{padding:14px}article{padding:15px}dl{display:block}}
-</style></head><body data-view="recent"><header><p>可追溯的阅读 · 有边界的推断 · 可检验的行动</p><h1>技能衍生离线看板 · 合成演示</h1><p>仅界面演示：展示课题记录、证据缺口与待执行行动的组织方式；不含真实论文或科学发现。</p><p>累计登记 2 篇；按人工保存状态，完成阅读 0 篇。结构检查不等于科学结论得到验证。</p></header>
-<section aria-label="批次综合与简报"><h2>跨论文综合与当次简报</h2><p>下列内容来自已保存的批次资料；本地构建工具只展示，不生成或核验研究结论。</p><section class="run"><h3>2026-10-22-demo</h3><details><summary>跨论文综合</summary><p><a href="runs/2026-10-22-demo/synthesis.md">打开保存文件</a></p><pre># 跨论文综合 · 合成演示
 
-没有真实论文，不作科学结论的支持或冲突综合。R001 是部分报告占位记录，R002 是仅候选占位记录；两者不能作为证据支持彼此。
+:root{color-scheme:light;--bg:#eeefed;--paper:#f7f7f4;--ink:#20242e;--muted:#656975;--line:#d7d9d8;--accent:#82513f;--serif:Georgia,'Noto Serif SC','Songti SC','SimSun',serif;font:15px/1.7 system-ui,-apple-system,'Segoe UI',sans-serif;color:var(--ink);background:var(--bg)}
+*{box-sizing:border-box}body{max-width:1512px;margin:0 auto;padding:0 44px}button,input,select{font:inherit;color:inherit}button,a,input,select,summary{-webkit-tap-highlight-color:transparent}button,a,summary{touch-action:manipulation}button{cursor:pointer}button:focus-visible,a:focus-visible,summary:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:4px}a{color:inherit;text-underline-offset:4px;text-decoration-color:#92969e}a:hover{color:var(--accent)}button{background:transparent;border:0}h1,h2,h3,p{margin-top:0}img{max-width:100%;max-height:650px}figure{margin:24px 0}figcaption{font-size:.8rem;color:var(--muted)}.muted{color:var(--muted)}
+.masthead{height:84px;display:flex;align-items:center;justify-content:space-between;gap:18px;border-bottom:1px solid var(--ink)}.brand{display:flex;align-items:center;gap:11px;font-family:var(--serif);font-size:20px;font-weight:700;letter-spacing:.03em}.brand-dot{display:inline-grid;place-items:center;width:21px;height:21px;background:var(--ink);color:var(--paper);border-radius:50%;font:12px/1 system-ui}.brand small{margin-left:8px;font:10px/1.2 system-ui;letter-spacing:.12em;text-transform:uppercase}.local-label{font-size:11px;letter-spacing:.1em;color:var(--muted)}.local-label:before{content:'';display:inline-block;width:5px;height:5px;margin:0 8px 1px 0;border-radius:50%;background:var(--accent)}
+.workspace{display:grid;grid-template-columns:185px minmax(0,1fr);gap:55px;align-items:start}.sidebar{position:sticky;top:26px;padding-top:43px}.rail-label,.eyebrow{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}.rail-label{margin:0 0 18px}.sidebar nav{display:grid}.sidebar button{display:flex;align-items:center;gap:12px;text-align:left;width:100%;padding:13px 0;border-bottom:1px solid var(--line);font-size:13px}.sidebar button:after{content:'↗';margin-left:auto;color:var(--muted);opacity:0;transform:translateX(-3px);transition:opacity .15s,transform .15s}.sidebar button:hover:after,.sidebar button[aria-pressed=true]:after{opacity:1;transform:none}.sidebar button[aria-pressed=true]{font-weight:650;color:var(--accent);border-color:var(--accent)}.nav-number{width:22px;font:12px var(--serif);color:var(--muted)}.rail-note{margin-top:65px;padding-top:16px;border-top:1px solid var(--line);font-size:11px;color:var(--muted);line-height:1.9}.rail-note b{display:block;margin-bottom:8px;color:var(--ink);font-weight:500}.rail-note span{display:block;font:10px/1.6 var(--serif);letter-spacing:.04em}
+.content{min-width:0}.hero{padding:49px 0 30px}.eyebrow{display:flex;align-items:center;gap:12px;margin-bottom:24px}.eyebrow:before{content:'';width:28px;border-top:1px solid var(--muted)}h1{font-family:var(--serif);font-size:clamp(34px,4.2vw,64px);font-weight:400;line-height:1.2;letter-spacing:-.035em;max-width:910px;margin-bottom:27px;overflow-wrap:anywhere}.hero-bottom{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(260px,1fr);gap:50px;align-items:end}.research-question{max-width:470px;margin:0;color:var(--muted);font-size:13px;line-height:1.95}.library-stats{display:flex;gap:36px;margin:0;justify-content:flex-end}.library-stats div{min-width:85px}.library-stats dt{font-size:11px;color:var(--muted);white-space:nowrap}.library-stats dd{margin:0;font:49px/1.05 var(--serif);letter-spacing:-.055em}.library-stats dd span{margin-left:7px;font:11px system-ui;color:var(--muted);letter-spacing:0}.verification-note{margin:20px 0 0;padding-top:15px;border-top:1px solid var(--line);font-size:10px;letter-spacing:.02em;color:var(--muted)}
+.catalog-bar{display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin:19px 0 14px}.catalog-heading{display:flex;gap:12px;align-items:baseline}.catalog-heading h2{font:400 28px/1.2 var(--serif);letter-spacing:-.02em;margin:0}.catalog-heading span{font-size:9px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}#count{margin:0;font-size:11px;color:var(--muted)}.filters{display:grid;grid-template-columns:minmax(220px,1.6fr) repeat(2,minmax(110px,.7fr)) minmax(105px,.65fr) minmax(100px,.6fr);border-top:1px solid var(--line);border-bottom:1px solid var(--ink);margin-bottom:3px;align-items:end}.filters label{padding:12px 12px 12px 0;min-width:0}.filters label+label{border-left:1px solid var(--line);padding-left:13px}.filters label>span{display:block;margin-bottom:5px;font-size:9px;letter-spacing:.06em;color:var(--muted)}input,select{width:100%;min-width:0;padding:4px 0;background:transparent;border:0;border-radius:0;outline-offset:2px;font-size:11px}input::placeholder{color:var(--muted);opacity:1}select{cursor:pointer}input[type=date]{font-size:11px}input::-webkit-calendar-picker-indicator{opacity:.55}
+article{position:relative;display:grid;grid-template-columns:128px minmax(0,1fr);column-gap:28px;padding:31px 0 29px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.record-index{padding-top:4px}.badge{display:block;font:29px/1.1 var(--serif);letter-spacing:-.03em}.record-status{display:inline-block;margin-top:13px;padding-left:10px;position:relative;font-size:10px;line-height:1.6;color:var(--accent)}.record-status:before{content:'';position:absolute;left:0;top:6px;width:4px;height:4px;border-radius:50%;background:currentColor}.record-date{margin:19px 0 0;font-size:10px;color:var(--muted)}.record-body{min-width:0}article header h2{font:400 25px/1.4 var(--serif);letter-spacing:-.02em;margin-bottom:10px}article header p{font-size:10px;color:var(--muted);margin-bottom:15px}.record-theme{margin-bottom:11px;font-size:9px;letter-spacing:.07em;color:var(--muted)}.record-summary{max-width:760px;font-size:12px;line-height:1.95;margin:0 0 18px;color:#515663}.files{display:flex;flex-wrap:wrap;gap:8px 18px;margin:0 0 18px;font-size:10px}.files a{text-decoration:none;border-bottom:1px solid #a5a6a5}.files a:after{content:' ↗';font-size:10px}details{font-size:12px}summary{cursor:pointer;list-style:none}summary::-webkit-details-marker{display:none}summary:after{content:'＋';float:right;padding-left:18px;font-size:13px;color:var(--muted)}details[open]>summary:after{content:'−'}article details{border-top:1px solid var(--line)}article details+details{margin-top:3px}article summary{padding:11px 0;font-size:10px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.95 system-ui,-apple-system,'Segoe UI',sans-serif;margin:10px 0 22px;color:#414652}ul{padding-left:20px}li{margin-bottom:10px}article details ul{font-size:10px}article .selected,article .actions{display:none}.selected h3,.actions h3{font:400 19px var(--serif);margin:20px 0 14px}.selected li,.actions li{font-size:12px}.actions dl{display:grid;grid-template-columns:8em minmax(0,1fr);gap:7px 16px;font-size:11px;margin:15px 0 24px}.actions dt{color:var(--muted)}.actions dd{margin:0}.actions li+li{padding-top:18px;border-top:1px solid var(--line)}body[data-view=evidence] .selected,body[data-view=actions] .actions{display:block}body[data-view=evidence] .reading,body[data-view=actions] .reading{display:none}.run-archive{border-top:1px solid var(--ink);border-bottom:1px solid var(--line);margin:33px 0 0}.run-archive>summary{padding:18px 0;font:400 20px/1.4 var(--serif)}.run-archive>summary>span{font:10px system-ui;color:var(--muted);margin-left:20px}.run-archive>section{padding:8px 0 16px}.run-archive p,.run-archive summary,.run-archive a{font-size:11px}.run-archive>summary{font:400 20px/1.4 var(--serif)}.run h3{font:400 16px var(--serif);margin:20px 0 13px}.run details{border-top:1px solid var(--line);padding:12px 0}.run-archive>section>p{max-width:660px}#empty{padding:55px 0;text-align:center;color:var(--muted);font:20px var(--serif)}footer{display:flex;justify-content:space-between;gap:40px;padding:28px 0 30px;color:var(--muted);font-size:9px;line-height:1.9}footer p{max-width:620px;margin:0}footer .updated{min-width:140px;text-align:right;font-size:9px}footer .updated span{display:block;letter-spacing:.1em;text-transform:uppercase;font-size:8px}[hidden]{display:none!important}
+@media(min-width:1500px){body{padding:0 56px}.workspace{gap:70px}}@media(max-width:1100px){body{padding:0 28px}.workspace{grid-template-columns:150px minmax(0,1fr);gap:32px}.hero-bottom{gap:20px}.library-stats{gap:20px}.library-stats dd{font-size:42px}.filters{grid-template-columns:minmax(180px,1.5fr) repeat(2,minmax(108px,1fr))}.filters label:nth-child(4){border-left:0;padding-left:0;border-top:1px solid var(--line)}.filters label:nth-child(5){border-top:1px solid var(--line)}article{grid-template-columns:100px minmax(0,1fr);gap:18px}.badge{font-size:26px}}
+@media(max-width:760px){body{padding:0 20px}.masthead{height:68px}.brand{font-size:18px}.brand small{display:none}.local-label{font-size:9px}.workspace{display:block}.sidebar{position:static;padding-top:0}.rail-label,.rail-note{display:none}.sidebar nav{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:3px}.sidebar button{gap:6px;font-size:11px;padding:17px 0 14px;justify-content:center}.sidebar button:after{display:none}.nav-number{width:auto;font-size:10px}.hero{padding:30px 0 20px}h1{font-size:38px;line-height:1.25;margin-bottom:23px}.eyebrow{font-size:8px;letter-spacing:.12em;margin-bottom:20px}.hero-bottom{grid-template-columns:1fr;gap:20px}.research-question{font-size:12px;max-width:100%}.library-stats{justify-content:flex-start;gap:45px}.library-stats div{display:flex;flex-direction:column-reverse;gap:6px}.library-stats dd{font-size:41px}.library-stats dt{font-size:10px}.verification-note{font-size:9px;margin-top:19px}.catalog-heading h2{font-size:25px}.catalog-heading span{display:none}.catalog-bar{margin-top:12px}.filters{grid-template-columns:repeat(2,minmax(0,1fr))}.filters .filter-search{grid-column:1/-1;padding:12px 0;border-bottom:1px solid var(--line)}.filters label:nth-child(2),.filters label:nth-child(4){border-left:0;padding-left:0}.filters label:nth-child(3){border-left:1px solid var(--line);padding-left:13px}.filters label:nth-child(4),.filters label:nth-child(5){border-top:1px solid var(--line)}.filters label:nth-child(5){border-left:1px solid var(--line);padding-left:13px}input,select{font-size:12px}article{grid-template-columns:65px minmax(0,1fr);gap:15px;padding:24px 0}.badge{font-size:23px}.record-status{font-size:9px;padding-left:8px}.record-date{font-size:8px;margin-top:16px}article header h2{font-size:21px;line-height:1.5}.record-theme,article header p{font-size:9px}.record-summary{font-size:11px}.files{font-size:9px;gap:9px 14px}article summary{font-size:10px}.actions dl{display:block}.actions dt{margin-top:12px}.actions dd{margin:3px 0}.run-archive>summary{font-size:17px}.run-archive>summary>span{display:none}footer{display:block;font-size:9px}footer .updated{text-align:left;margin-top:16px}footer .updated span{display:inline;margin-right:10px}}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}@media print{body{padding:0;background:white}.sidebar,.filters{display:none}.workspace{display:block}.masthead{height:58px}.hero{padding-top:25px}article{break-inside:avoid}.content{width:100%}footer{border-top:1px solid var(--line)}}
 
-判断变化：仅展示从“题录存在”到“证据尚不足”的边界意识，没有改变真实课题的研究判断。
-
-优先待执行行动（合成说明，不会自动运行）：
-1. R001 / A01（P1）：先取得可靠全文，核对独立单位与重复层级；科学价值与资源可行性待真实课题确认。
-2. R002 / A01（P2）：先核实身份与版本，再判断是否适合纳入。
-
-暂缓路线：没有真实来源、设备条件和数据时，暂缓实验迁移与数值阈值设定。
-</pre></details><details><summary>当次简报</summary><p><a href="runs/2026-10-22-demo/brief.md">打开保存文件</a></p><pre># 当次简报 · 合成演示
-
-演示日期：2026-10-22。
-真实检索新增：0 篇；累计真实论文：0 篇；完整精读：0 篇。
-界面占位记录：2 条（部分报告 R001、仅候选 R002），不计为真实文献成果。
-默认目标数 5 仅为配置展示，本演示未启动检索任务，不计算成已执行批次的缺额。
-
-- R001：演示部分报告如何保留来源、精读位置和证据缺口。无原文链接。
-- R002：演示仅候选记录如何避免冒充完成精读。无原文链接。
-- 最值得精读的真实证据：无；当前只有合成定位说明。
-- 主要启示：区分文件结构通过、来源取得与科学证据核验。
-- 优先行动：R001/A01、R002/A01 均待执行；不启动网络请求。
-- 保存位置：当前演示根目录 index.html；笔记和证据通过相对路径打开。
-- 尚未核验：所有真实题录、正文、图表、公式与科学结论；未应用 Norman 技能。
-</pre></details><details><summary>检索与筛选记录</summary><p><a href="runs/2026-10-22-demo/search-log.json">打开保存文件</a></p><pre>{
-  &quot;synthetic&quot;: true,
-  &quot;demo_date&quot;: &quot;2026-10-22&quot;,
-  &quot;executed_search&quot;: false,
-  &quot;network_requests&quot;: 0,
-  &quot;paid_api_calls&quot;: 0,
-  &quot;external_reading_engine_calls&quot;: 0,
-  &quot;search_queries&quot;: [],
-  &quot;search_sources&quot;: [],
-  &quot;real_papers_discovered&quot;: 0,
-  &quot;real_papers_added&quot;: 0,
-  &quot;complete_readings&quot;: 0,
-  &quot;synthetic_records&quot;: [
-    {
-      &quot;id&quot;: &quot;R001&quot;,
-      &quot;status&quot;: &quot;partial&quot;
-    },
-    {
-      &quot;id&quot;: &quot;R002&quot;,
-      &quot;status&quot;: &quot;candidate&quot;
-    }
-  ],
-  &quot;selection_reason&quot;: &quot;仅供演示文件结构及两种未完成状态，不是检索入选记录。&quot;,
-  &quot;exclusions&quot;: [],
-  &quot;shortfall&quot;: &quot;未执行真实检索批次，不以合成记录凑数。&quot;
-}
-</pre></details></section></section><nav aria-label="研究视图"><button data-view="recent" aria-pressed="true">最近更新</button><button data-view="all" aria-pressed="false">全部文献</button><button data-view="evidence" aria-pressed="false">精选精读</button><button data-view="actions" aria-pressed="false">下一步研究</button></nav><div class="filters"><input type="search" id="q" placeholder="关键词、作者、编号" aria-label="关键词"><input type="date" id="from" aria-label="起始日期"><input type="date" id="to" aria-label="结束日期"><input id="theme" placeholder="主题" aria-label="主题"><select id="priority" aria-label="优先级"><option value="">全部优先级</option><option>P0</option><option>P1</option><option>P2</option><option>高</option><option>中</option><option>低</option></select></div><p id="count" aria-live="polite"></p><main><article data-search="r002 【合成演示】外部验证研究的候选记录示例 虚构作者乙（合成演示） 合成演示, 外部验证 # r002 · 【合成演示】外部验证研究的候选记录示例
+</style></head><body data-view="recent"><header class="masthead"><div class="brand"><span class="brand-dot" aria-hidden="true">·</span>研序 <small>Paper Workbench</small></div><span class="local-label">本地研究档案 · OFFLINE LIBRARY</span></header>
+<div class="workspace"><aside class="sidebar"><p class="rail-label">Research index / 研究目录</p><nav aria-label="研究视图"><button data-view="recent" aria-pressed="true"><span class="nav-number" aria-hidden="true">I.</span>最近更新</button><button data-view="all" aria-pressed="false"><span class="nav-number" aria-hidden="true">II.</span>全部文献</button><button data-view="evidence" aria-pressed="false"><span class="nav-number" aria-hidden="true">III.</span>精选精读</button><button data-view="actions" aria-pressed="false"><span class="nav-number" aria-hidden="true">IV.</span>下一步研究</button></nav><p class="rail-note"><b>可追溯的阅读<br>有边界的推断<br>可检验的行动</b><span>Read. Question. Test.</span>从保存的证据出发，<br>让下一步研究有据可循。</p></aside>
+<main class="content"><section class="hero"><p class="eyebrow">Personal research library / 课题文献库</p><h1>技能衍生离线看板 · 合成演示</h1><div class="hero-bottom"><p class="research-question">仅界面演示：展示课题记录、证据缺口与待执行行动的组织方式；不含真实论文或科学发现。</p><dl class="library-stats"><div><dt>累计登记</dt><dd>02<span>篇</span></dd></div><div><dt>按保存状态完成阅读</dt><dd>00<span>篇</span></dd></div></dl></div><p class="verification-note">阅读状态来自人工保存记录。结构检查不等于科学结论得到验证。</p></section>
+<section aria-label="文献目录"><div class="catalog-bar"><div class="catalog-heading"><h2 id="view-title">最近更新</h2><span id="view-caption">Recently updated</span></div><p id="count" aria-live="polite"></p></div><div class="filters"><label class="filter-search"><span>检索已保存的研究</span><input type="search" id="q" placeholder="关键词、作者或论文编号…" aria-label="关键词"></label><label><span>起始日期</span><input type="date" id="from" aria-label="起始日期"></label><label><span>结束日期</span><input type="date" id="to" aria-label="结束日期"></label><label><span>研究主题</span><input id="theme" placeholder="全部主题" aria-label="主题"></label><label><span>行动优先级</span><select id="priority" aria-label="优先级"><option value="">全部优先级</option><option>P0</option><option>P1</option><option>P2</option><option>高</option><option>中</option><option>低</option></select></label></div><div class="catalog-list"><article data-search="r002 【合成演示】外部验证研究的候选记录示例 虚构作者乙（合成演示） 合成演示, 外部验证 # r002 · 【合成演示】外部验证研究的候选记录示例
 
 &gt; 全部为合成演示，不是真实论文精读。
 
@@ -129,8 +91,8 @@ sample_size_basis：待有真实研究问题与先导依据后确定。
 
 来源仅为 source/synthetic-text.txt 及 source/source_map.json。无真实论文或原图；未调用模型、联网检索或 norman-paper-reading，不使用其完成署名。
 " data-date="2026-10-22" data-theme="合成演示, 外部验证" data-priority="P2" data-selected="yes">
-<header><span class="badge">R002 · candidate</span><span>2026-10-22 · 合成演示, 外部验证</span><h2>【合成演示】外部验证研究的候选记录示例</h2><p>虚构作者乙（合成演示） · 2026 · 原文链接未提供</p></header>
-<div class="reading"><p class="files"><a href="2026-10-22/R002/reading-note.md">阅读笔记</a> · <a href="2026-10-22/R002/evidence.json">证据 JSON</a> · <a href="2026-10-22/R002/metadata.json">题录与阅读状态</a></p><details><summary>展开完整阅读报告</summary><pre># R002 · 【合成演示】外部验证研究的候选记录示例
+<div class="record-index"><span class="badge">R002</span><span class="record-status" title="保存的阅读状态：candidate">仅候选</span><p class="record-date">2026-10-22</p></div><div class="record-body"><header><div class="record-theme">合成演示, 外部验证</div><h2>【合成演示】外部验证研究的候选记录示例</h2><p>虚构作者乙（合成演示） · 2026 · 原文链接未提供</p></header><p class="record-summary">这是一条仅候选的虚构题录，用于展示候选不等于完成精读。题录身份、发表状态、全文与验证数据均不存在真实来源，不能作为本课题的科学证据。</p>
+<div class="reading"><div class="files"><a href="2026-10-22/R002/reading-note.md">阅读笔记</a><a href="2026-10-22/R002/evidence.json">证据 JSON</a><a href="2026-10-22/R002/metadata.json">题录与阅读状态</a></div><details><summary>展开完整阅读报告</summary><pre># R002 · 【合成演示】外部验证研究的候选记录示例
 
 &gt; 全部为合成演示，不是真实论文精读。
 
@@ -207,7 +169,7 @@ sample_size_basis：待有真实研究问题与先导依据后确定。
 
 来源仅为 source/synthetic-text.txt 及 source/source_map.json。无真实论文或原图；未调用模型、联网检索或 norman-paper-reading，不使用其完成署名。
 </pre></details><details><summary>来源与图像文件</summary><ul><li><a href="2026-10-22/R002/source/source_map.json">source/source_map.json</a></li><li><a href="2026-10-22/R002/source/synthetic-text.txt">source/synthetic-text.txt</a></li></ul></details></div>
-<section class="selected"><h3>需要重点精读的证据</h3><ul><li>示例定位：待核实真实来源后重点阅读数据划分与外部验证章节；原因：判断结论是否超出训练样本。当前没有可精读正文，未核验。</li></ul></section><section class="actions"><h3>下一步研究</h3><ul><li><strong>核实来源身份，再判断是否纳入（合成行动）</strong> <span class="badge">待执行 · P2</span><dl><dt>证据缺口</dt><dd>当前是虚构题录，没有正式发表身份或正文。</dd><dt>待回答问题</dt><dd>未来找到的真实研究是否有独立外部验证？</dd><dt>假设</dt><dd>尚不能提出基于此候选的科学假设。</dd><dt>方法</dt><dd>待执行：核对真实出版社身份与版本，再取得数据划分和验证协议。</dd><dt>实验单位</dt><dd>未知；不得从题目推定。</dd><dt>数据</dt><dd>当前无真实数据。</dd><dt>对照</dt><dd>需核对训练、调参与测试数据边界；基线未知。</dd><dt>混杂控制</dt><dd>待核对数据泄漏、对象差异和指标定义。</dd><dt>支持方向</dt><dd>可核实身份及独立验证协议后才可继续分析。</dd><dt>削弱方向</dt><dd>身份无法核实或缺少关键协议则不计完整精读。</dd><dt>判断依据</dt><dd>以可靠来源与实际正文覆盖判断，无预设数值门槛。</dd><dt>资源</dt><dd>全文与资源条件未知。</dd><dt>前置条件</dt><dd>实际检索到的真实论文；本演示未执行检索。</dd><dt>交付成果</dt><dd>待执行：身份与版本核对记录。</dd><dt>停止条件</dt><dd>来源不可靠时保留排除理由并停止纳入。</dd><dt>样本量依据</dt><dd>待有真实研究问题与先导依据后确定。</dd></dl></li></ul></section></article><article data-search="r001 【合成演示】测量重复性研究的报告结构示例 虚构作者甲（合成演示） 合成演示, 测量与重复性 # r001 · 【合成演示】测量重复性研究的报告结构示例
+<section class="selected"><h3>需要重点精读的证据</h3><ul><li>示例定位：待核实真实来源后重点阅读数据划分与外部验证章节；原因：判断结论是否超出训练样本。当前没有可精读正文，未核验。</li></ul></section><section class="actions"><h3>下一步研究</h3><ul><li><strong>核实来源身份，再判断是否纳入（合成行动）</strong> <span class="badge">待执行 · P2</span><dl><dt>证据缺口</dt><dd>当前是虚构题录，没有正式发表身份或正文。</dd><dt>待回答问题</dt><dd>未来找到的真实研究是否有独立外部验证？</dd><dt>假设</dt><dd>尚不能提出基于此候选的科学假设。</dd><dt>方法</dt><dd>待执行：核对真实出版社身份与版本，再取得数据划分和验证协议。</dd><dt>实验单位</dt><dd>未知；不得从题目推定。</dd><dt>数据</dt><dd>当前无真实数据。</dd><dt>对照</dt><dd>需核对训练、调参与测试数据边界；基线未知。</dd><dt>混杂控制</dt><dd>待核对数据泄漏、对象差异和指标定义。</dd><dt>支持方向</dt><dd>可核实身份及独立验证协议后才可继续分析。</dd><dt>削弱方向</dt><dd>身份无法核实或缺少关键协议则不计完整精读。</dd><dt>判断依据</dt><dd>以可靠来源与实际正文覆盖判断，无预设数值门槛。</dd><dt>资源</dt><dd>全文与资源条件未知。</dd><dt>前置条件</dt><dd>实际检索到的真实论文；本演示未执行检索。</dd><dt>交付成果</dt><dd>待执行：身份与版本核对记录。</dd><dt>停止条件</dt><dd>来源不可靠时保留排除理由并停止纳入。</dd><dt>样本量依据</dt><dd>待有真实研究问题与先导依据后确定。</dd></dl></li></ul></section></div></article><article data-search="r001 【合成演示】测量重复性研究的报告结构示例 虚构作者甲（合成演示） 合成演示, 测量与重复性 # r001 · 【合成演示】测量重复性研究的报告结构示例
 
 &gt; 全部为合成演示，不是真实论文精读。
 
@@ -284,8 +246,8 @@ sample_size_basis：未知；有真实研究方案后依据文献或先导实验
 
 来源仅为 source/synthetic-text.txt 及 source/source_map.json。无真实论文或原图；未调用模型、联网检索或 norman-paper-reading，不使用其完成署名。
 " data-date="2026-10-22" data-theme="合成演示, 测量与重复性" data-priority="P1" data-selected="yes">
-<header><span class="badge">R001 · partial</span><span>2026-10-22 · 合成演示, 测量与重复性</span><h2>【合成演示】测量重复性研究的报告结构示例</h2><p>虚构作者甲（合成演示） · 2026 · 原文链接未提供</p></header>
-<div class="reading"><p class="files"><a href="2026-10-22/R001/reading-note.md">阅读笔记</a> · <a href="2026-10-22/R001/evidence.json">证据 JSON</a> · <a href="2026-10-22/R001/metadata.json">题录与阅读状态</a></p><details><summary>展开完整阅读报告</summary><pre># R001 · 【合成演示】测量重复性研究的报告结构示例
+<div class="record-index"><span class="badge">R001</span><span class="record-status" title="保存的阅读状态：partial">部分报告</span><p class="record-date">2026-10-22</p></div><div class="record-body"><header><div class="record-theme">合成演示, 测量与重复性</div><h2>【合成演示】测量重复性研究的报告结构示例</h2><p>虚构作者甲（合成演示） · 2026 · 原文链接未提供</p></header><p class="record-summary">这是一条用于演示部分报告的虚构记录。已保存的仅是本地合成文字，没有真实全文、测量结果或原图，不能得出测量重复性的科学结论。</p>
+<div class="reading"><div class="files"><a href="2026-10-22/R001/reading-note.md">阅读笔记</a><a href="2026-10-22/R001/evidence.json">证据 JSON</a><a href="2026-10-22/R001/metadata.json">题录与阅读状态</a></div><details><summary>展开完整阅读报告</summary><pre># R001 · 【合成演示】测量重复性研究的报告结构示例
 
 &gt; 全部为合成演示，不是真实论文精读。
 
@@ -362,5 +324,56 @@ sample_size_basis：未知；有真实研究方案后依据文献或先导实验
 
 来源仅为 source/synthetic-text.txt 及 source/source_map.json。无真实论文或原图；未调用模型、联网检索或 norman-paper-reading，不使用其完成署名。
 </pre></details><details><summary>来源与图像文件</summary><ul><li><a href="2026-10-22/R001/source/source_map.json">source/source_map.json</a></li><li><a href="2026-10-22/R001/source/synthetic-text.txt">source/synthetic-text.txt</a></li><li><a href="2026-10-22/R001/assets/research-flow.svg">assets/research-flow.svg</a></li></ul></details></div>
-<section class="selected"><h3>需要重点精读的证据</h3><ul><li>示例定位：待取得真实全文的方法节、重复层级与误差定义；原因：判断技术重复与独立样本能否区分。当前尚无对应原文，未核验。</li></ul></section><section class="actions"><h3>下一步研究</h3><ul><li><strong>先补齐可追溯的方法与重复层级来源（合成行动）</strong> <span class="badge">待执行 · P1</span><dl><dt>证据缺口</dt><dd>合成记录不包含真实方法、独立样本或误差定义。</dd><dt>待回答问题</dt><dd>真实研究是否区分独立样本与技术重复？目前无法回答。</dd><dt>假设</dt><dd>待取得真实论文后再提出可否定的科学假设；本演示不补造。</dd><dt>方法</dt><dd>待执行：取得合法可读全文，逐项摘录实验单位、重复层级及其原文定位。</dd><dt>实验单位</dt><dd>未知，须由真实方法节确认。</dd><dt>数据</dt><dd>当前只有合成示例文字，不能作为研究数据。</dd><dt>对照</dt><dd>先对照正文、图注与补充方法；实验基线尚未报告。</dd><dt>混杂控制</dt><dd>待核对同一样品多次测量是否被误当作独立样本。</dd><dt>支持方向</dt><dd>未来若明确报告独立实验单位和重复层级，可支持继续评估该证据。</dd><dt>削弱方向</dt><dd>未来若来源不足或单位含混，应保留未核验并暂缓迁移。</dd><dt>判断依据</dt><dd>以可追溯原文为依据；当前没有数值阈值。</dd><dt>资源</dt><dd>资源未知；先确认全文访问条件，不假设已有设备。</dd><dt>前置条件</dt><dd>真实论文及合法来源；当前均未提供。</dd><dt>交付成果</dt><dd>待执行：来源定位与重复层级核对表。</dd><dt>停止条件</dt><dd>无法取得可靠全文时停止结论迁移并报告缺口。</dd><dt>样本量依据</dt><dd>未知；有真实研究方案后依据文献或先导实验确定。</dd></dl></li></ul></section></article></main><p id="empty" hidden>没有符合条件的文献。</p><footer>本页由本地记录构建，无网络检索、模型调用或自动执行。原文链接由你点击打开。完整内容以 reading-note.md 与 evidence.json 为准。最近更新显示最多 20 条，全部文献不限制条数。更新：2026-10-22T00:00:00+00:00</footer>
-<script>(()=>{'use strict';const fields=['q','from','to','theme','priority'].map(id=>document.getElementById(id));const cards=[...document.querySelectorAll('article')];let view='recent';function filter(){const [q,from,to,theme,priority]=fields.map(el=>el.value.trim().toLowerCase());let shown=0;for(const card of cards){const d=card.dataset;const match=(!q||d.search.includes(q))&&(!from||d.date>=from)&&(!to||d.date<=to)&&(!theme||d.theme.includes(theme))&&(!priority||d.priority.toLowerCase().split(' ').includes(priority))&&(view!=='evidence'||d.selected==='yes');card.hidden=!match||(view==='recent'&&shown>=20);if(!card.hidden)shown++;}document.getElementById('count').textContent='当前显示 '+shown+' 篇';document.getElementById('empty').hidden=shown>0;}for(const field of fields)field.addEventListener('input',filter);for(const button of document.querySelectorAll('button[data-view]'))button.addEventListener('click',()=>{view=button.dataset.view;document.body.dataset.view=view;for(const item of document.querySelectorAll('button[data-view]'))item.setAttribute('aria-pressed',String(item===button));filter();});filter();})();</script></body></html>
+<section class="selected"><h3>需要重点精读的证据</h3><ul><li>示例定位：待取得真实全文的方法节、重复层级与误差定义；原因：判断技术重复与独立样本能否区分。当前尚无对应原文，未核验。</li></ul></section><section class="actions"><h3>下一步研究</h3><ul><li><strong>先补齐可追溯的方法与重复层级来源（合成行动）</strong> <span class="badge">待执行 · P1</span><dl><dt>证据缺口</dt><dd>合成记录不包含真实方法、独立样本或误差定义。</dd><dt>待回答问题</dt><dd>真实研究是否区分独立样本与技术重复？目前无法回答。</dd><dt>假设</dt><dd>待取得真实论文后再提出可否定的科学假设；本演示不补造。</dd><dt>方法</dt><dd>待执行：取得合法可读全文，逐项摘录实验单位、重复层级及其原文定位。</dd><dt>实验单位</dt><dd>未知，须由真实方法节确认。</dd><dt>数据</dt><dd>当前只有合成示例文字，不能作为研究数据。</dd><dt>对照</dt><dd>先对照正文、图注与补充方法；实验基线尚未报告。</dd><dt>混杂控制</dt><dd>待核对同一样品多次测量是否被误当作独立样本。</dd><dt>支持方向</dt><dd>未来若明确报告独立实验单位和重复层级，可支持继续评估该证据。</dd><dt>削弱方向</dt><dd>未来若来源不足或单位含混，应保留未核验并暂缓迁移。</dd><dt>判断依据</dt><dd>以可追溯原文为依据；当前没有数值阈值。</dd><dt>资源</dt><dd>资源未知；先确认全文访问条件，不假设已有设备。</dd><dt>前置条件</dt><dd>真实论文及合法来源；当前均未提供。</dd><dt>交付成果</dt><dd>待执行：来源定位与重复层级核对表。</dd><dt>停止条件</dt><dd>无法取得可靠全文时停止结论迁移并报告缺口。</dd><dt>样本量依据</dt><dd>未知；有真实研究方案后依据文献或先导实验确定。</dd></dl></li></ul></section></div></article></div><p id="empty" hidden>没有符合条件的文献。</p></section><details class="run-archive"><summary>跨论文综合与当次简报 <span>打开保存的批次资料 ↗</span></summary><section aria-label="批次综合与简报"><p class="muted">下列内容来自已保存的批次资料；本地构建工具只展示，不生成或核验研究结论。</p><section class="run"><h3>2026-10-22-demo</h3><details><summary>跨论文综合</summary><p><a href="runs/2026-10-22-demo/synthesis.md">打开保存文件</a></p><pre># 跨论文综合 · 合成演示
+
+没有真实论文，不作科学结论的支持或冲突综合。R001 是部分报告占位记录，R002 是仅候选占位记录；两者不能作为证据支持彼此。
+
+判断变化：仅展示从“题录存在”到“证据尚不足”的边界意识，没有改变真实课题的研究判断。
+
+优先待执行行动（合成说明，不会自动运行）：
+1. R001 / A01（P1）：先取得可靠全文，核对独立单位与重复层级；科学价值与资源可行性待真实课题确认。
+2. R002 / A01（P2）：先核实身份与版本，再判断是否适合纳入。
+
+暂缓路线：没有真实来源、设备条件和数据时，暂缓实验迁移与数值阈值设定。
+</pre></details><details><summary>当次简报</summary><p><a href="runs/2026-10-22-demo/brief.md">打开保存文件</a></p><pre># 当次简报 · 合成演示
+
+演示日期：2026-10-22。
+真实检索新增：0 篇；累计真实论文：0 篇；完整精读：0 篇。
+界面占位记录：2 条（部分报告 R001、仅候选 R002），不计为真实文献成果。
+默认目标数 5 仅为配置展示，本演示未启动检索任务，不计算成已执行批次的缺额。
+
+- R001：演示部分报告如何保留来源、精读位置和证据缺口。无原文链接。
+- R002：演示仅候选记录如何避免冒充完成精读。无原文链接。
+- 最值得精读的真实证据：无；当前只有合成定位说明。
+- 主要启示：区分文件结构通过、来源取得与科学证据核验。
+- 优先行动：R001/A01、R002/A01 均待执行；不启动网络请求。
+- 保存位置：当前演示根目录 index.html；笔记和证据通过相对路径打开。
+- 尚未核验：所有真实题录、正文、图表、公式与科学结论；未应用 Norman 技能。
+</pre></details><details><summary>检索与筛选记录</summary><p><a href="runs/2026-10-22-demo/search-log.json">打开保存文件</a></p><pre>{
+  &quot;synthetic&quot;: true,
+  &quot;demo_date&quot;: &quot;2026-10-22&quot;,
+  &quot;executed_search&quot;: false,
+  &quot;network_requests&quot;: 0,
+  &quot;paid_api_calls&quot;: 0,
+  &quot;external_reading_engine_calls&quot;: 0,
+  &quot;search_queries&quot;: [],
+  &quot;search_sources&quot;: [],
+  &quot;real_papers_discovered&quot;: 0,
+  &quot;real_papers_added&quot;: 0,
+  &quot;complete_readings&quot;: 0,
+  &quot;synthetic_records&quot;: [
+    {
+      &quot;id&quot;: &quot;R001&quot;,
+      &quot;status&quot;: &quot;partial&quot;
+    },
+    {
+      &quot;id&quot;: &quot;R002&quot;,
+      &quot;status&quot;: &quot;candidate&quot;
+    }
+  ],
+  &quot;selection_reason&quot;: &quot;仅供演示文件结构及两种未完成状态，不是检索入选记录。&quot;,
+  &quot;exclusions&quot;: [],
+  &quot;shortfall&quot;: &quot;未执行真实检索批次，不以合成记录凑数。&quot;
+}
+</pre></details></section></section></details><footer><p>本页由本地记录构建，无网络检索、模型调用或自动执行。原文链接由你点击打开。完整内容以 reading-note.md 与 evidence.json 为准。最近更新显示最多 20 条，全部文献不限制条数。</p><p class="updated"><span>Last updated</span>2026-10-22T05:22:02+00:00</p></footer></main></div>
+<script>(()=>{'use strict';const fields=['q','from','to','theme','priority'].map(id=>document.getElementById(id));const cards=[...document.querySelectorAll('article')];let view='recent';function filter(){const [q,from,to,theme,priority]=fields.map(el=>el.value.trim().toLowerCase());let shown=0;for(const card of cards){const d=card.dataset;const match=(!q||d.search.includes(q))&&(!from||d.date>=from)&&(!to||d.date<=to)&&(!theme||d.theme.includes(theme))&&(!priority||d.priority.toLowerCase().split(' ').includes(priority))&&(view!=='evidence'||d.selected==='yes');card.hidden=!match||(view==='recent'&&shown>=20);if(!card.hidden)shown++;}document.getElementById('count').textContent='当前显示 '+shown+' 篇';document.getElementById('empty').hidden=shown>0;}for(const field of fields)field.addEventListener('input',filter);for(const button of document.querySelectorAll('button[data-view]'))button.addEventListener('click',()=>{view=button.dataset.view;document.body.dataset.view=view;const labels={recent:['最近更新','Recently updated'],all:['全部文献','The research catalog'],evidence:['精选精读','Evidence worth reading'],actions:['下一步研究','From evidence to action']};document.getElementById('view-title').textContent=labels[view][0];document.getElementById('view-caption').textContent=labels[view][1];for(const item of document.querySelectorAll('button[data-view]'))item.setAttribute('aria-pressed',String(item===button));filter();});filter();})();</script></body></html>

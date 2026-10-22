@@ -6,36 +6,41 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; worker-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="description" content="从研究问题到可检验行动。按课题检索、精读并积累可追溯的论文证据。">
   <title>研序 Paper Workbench · 学术文献研究看板</title>
-  <link rel="stylesheet" href="./styles.css?v=20261021-research">
+  <link rel="stylesheet" href="./styles.css?v=20261022-library">
   <link rel="stylesheet" href="./vendor/Temml-Local.css">
+  <link rel="stylesheet" href="./editorial.css?v=20261022-library">
   <script defer src="./vendor/temml.min.js"></script>
-  <script type="module" src="./app.js?v=20261021-research"></script>
+  <script type="module" src="./app.js?v=20261022-library"></script>
 </head>
 <body>
+  <a class="skip-link" href="#main">跳至主要内容</a>
+  <header class="topbar">
+    <a class="brand" href="./"><span class="brand-mark" aria-hidden="true">研</span><span>研序<small>PAPER WORKBENCH</small></span></a>
+    <div class="top-context"><span class="breadcrumb">研究空间</span><span class="slash">/</span><span id="breadcrumbName">课题首页</span></div>
+    <div class="top-actions"><span class="pill" id="modePill">DEMO · 合成数据</span><button class="quiet" id="refreshWorkspace" aria-label="刷新研究空间">刷新</button><button id="topSettings" aria-label="连接与模型设置">设置</button><button class="quiet" id="storageButton" hidden>保存目录</button><button class="quiet" id="help">使用说明 ↗</button></div>
+  </header>
   <aside class="sidebar">
-    <a class="brand" href="./"><span class="brand-mark">研</span><span>研序<small>PAPER WORKBENCH</small></span></a>
-    <p class="side-caption">研究工作台</p>
+    <p class="side-caption">个人研究目录 <span aria-hidden="true">↙</span></p>
     <nav aria-label="工作区导航">
-      <button class="side-link active" data-nav="home"><span>◫</span>课题首页</button>
+      <button class="side-link active" data-nav="home"><span aria-hidden="true">I.</span>课题首页<span class="nav-arrow" aria-hidden="true">↗</span></button>
       <div id="projectSidebarNav" hidden>
         <p class="side-caption">课题内容</p>
-        <button class="side-link" data-nav="library"><span>▤</span>文献报告</button>
+        <button class="side-link" data-nav="library"><span aria-hidden="true">II.</span>文献报告<span class="nav-arrow" aria-hidden="true">↗</span></button>
       </div>
     </nav>
     <div class="side-divider"></div>
     <p class="side-caption">当前课题</p>
     <select id="projectSelect" aria-label="选择当前课题"><option>示例研究课题</option></select>
     <button class="side-new" id="newProject">＋ 创建课题</button>
-    <div class="side-note"><span class="tiny-line"></span><strong>每个结论，都有来处。</strong><p>保留证据的边界，让下一步研究有据可循。</p></div>
-    <button class="side-link" id="settings"><span>⚙</span>连接与模型设置</button>
+    <div class="side-note"><span class="tiny-line"></span><strong>每个结论，<br>都有来处。</strong><p>从科学问题出发，<br>积累可追溯的研究。</p><span class="side-edition">A PERSONAL RESEARCH LIBRARY</span></div>
+    <button class="side-link" id="settings"><span aria-hidden="true">III.</span>连接与模型设置</button>
     <div class="connection"><span id="connectionDot" class="dot"></span><span id="connectionLabel">独立示例演示</span><button id="logout" hidden>退出</button></div>
   </aside>
 
   <div class="shell">
-    <header class="topbar"><div><span class="breadcrumb">研究空间</span><span class="slash">/</span><span id="breadcrumbName">示例课题</span></div><div class="top-actions"><span class="pill" id="modePill">DEMO · 合成数据</span><button class="quiet" id="refreshWorkspace" aria-label="刷新研究空间">刷新</button><button id="topSettings" aria-label="连接与模型设置">⚙</button><button class="quiet" id="storageButton" hidden>保存目录</button><button class="quiet" id="help">使用说明 ↗</button></div></header>
-    <main id="main">
-      <section class="page-heading"><div><p class="eyebrow" id="pageEyebrow">YOUR RESEARCH PROJECTS</p><h1 id="pageTitle">从一个课题，开始研究。</h1><p class="intro" id="pageIntro">选择或创建课题，在课题内积累文献、分析结果与研究行动。</p></div><button class="primary" id="newBatch">＋ 创建课题</button></section>
-      <div class="demo-notice" id="demoNotice"><span>◈</span><div><strong>你正在浏览合成示例</strong><span>示例不调用 API。连接模型 API 后，可在当前浏览器创建课题并检索文献。</span></div><button id="connect">连接 API →</button></div>
+    <main id="main" class="is-home" tabindex="-1">
+      <section class="page-heading"><div class="heading-copy"><p class="eyebrow" id="pageEyebrow">YOUR RESEARCH PROJECTS</p><h1 id="pageTitle">从一个课题，开始研究。</h1><p class="intro" id="pageIntro">选择或创建课题，在课题内积累文献、分析结果与研究行动。</p><button class="primary" id="newBatch">＋ 创建课题</button></div><div class="collection-index"><span class="eyebrow">IN YOUR WORKSPACE</span><strong id="projectCount">01</strong><p>个研究课题<span>问题 · 证据 · 下一步行动</span></p></div></section>
+      <div class="demo-notice" id="demoNotice"><span class="notice-number" aria-hidden="true">i</span><div><strong>合成示例 · 供你探索工作台</strong><span>示例不调用 API。连接模型 API 后，可在当前浏览器创建课题并检索文献。</span></div><button id="connect">连接 API ↗</button></div>
       <div class="direct-notice" id="directNotice" hidden><strong>API 直连</strong><span>课题与报告保存在当前浏览器。Key 仅本页内存，运行时请保持此页打开。</span><button id="directSettings">配置 API</button></div>
       <section class="topic-strip" id="topicStrip" hidden><div><span class="topic-icon">⌘</span></div><div class="topic-content"><span class="eyebrow">当前研究课题</span><h2 id="topicTitle">城市绿地与热环境</h2><p id="topicGoal">探索研究问题、证据和方法之间的联系</p></div><div class="topic-actions"><button class="outline" id="editScope">课题配置与参考 PDF</button><button class="quiet" id="switchProject">返回课题</button><button class="quiet danger-text" id="deleteProject">删除课题</button></div></section>
       <section class="workflow-guide" id="workflowGuide" aria-label="研究操作引导" hidden></section>

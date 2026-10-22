@@ -158,6 +158,8 @@ function render(){
   if(state.nav==='jobs')state.nav='library';
   if(!state.project||state.nav!=='library')state.nav='home';
   const home=state.nav==='home';
+  $('main').classList.toggle('is-home',home);$('main').classList.toggle('is-library',!home);
+  $('projectCount').textContent=state.offline||state.connecting?'—':String(state.projects.length).padStart(2,'0');
   for(const id of ['topicStrip','projectSidebarNav'])$(id).hidden=home;
   $('workflowGuide').hidden=home;$('stats').hidden=true;
   $('pageEyebrow').textContent=home?'YOUR RESEARCH PROJECTS':'PROJECT RESEARCH WORKSPACE';
@@ -519,7 +521,7 @@ async function retryForm(jid){
 function renderProjects(){
   const unavailable=state.offline||state.connecting;
   const service=unavailable?`<section class="home-service" role="status"><h2>${state.connecting?'正在连接私人研究空间':'私人服务暂不可用'}</h2><p>${esc(state.offline||'正在读取你的课题列表…')}</p><p>已保存资料仍保留在私人后台。连接恢复后继续打开课题。</p>${state.connecting?'':'<button class="outline" id="homeReconnect">重新连接服务 →</button>'}</section>`:'';
-  const cards=state.projects.map(p=>`<article class="project-card"><div class="project-card-top"><span class="project-symbol">⌘</span>${state.demo?badge('合成示例','warning'):`<button class="quiet danger-text" data-delete-project="${esc(p.id)}" aria-label="删除课题：${esc(p.name)}">删除</button>`}</div><h3>${esc(p.name)}</h3><p>${esc(p.goal||'打开课题后确认研究范围，开始整理文献与证据。')}</p><div class="tags">${(p.scope?.keywords||[]).slice(0,5).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div><div class="project-card-bottom"><span>文献报告 · 研究行动</span><button class="outline" data-open-project="${esc(p.id)}" ${state.projectLoading||state.connecting?'disabled':''}>${state.projectLoading?'正在读取…':'进入课题 →'}</button></div></article>`).join('');
+  const cards=state.projects.map((p,index)=>`<article class="project-card"><div class="project-card-top"><span class="project-index">PROJECT / ${String(index+1).padStart(2,'0')}</span>${state.demo?badge('合成示例','warning'):`<button class="quiet danger-text" data-delete-project="${esc(p.id)}" aria-label="删除课题：${esc(p.name)}">删除</button>`}</div><h3>${esc(p.name)}</h3><p>${esc(p.goal||'打开课题后确认研究范围，开始整理文献与证据。')}</p><div class="tags">${(p.scope?.keywords||[]).slice(0,5).map(t=>`<span class="tag">${esc(t)}</span>`).join('')}</div><div class="project-card-bottom"><span>文献报告 · 研究行动</span><button class="outline" data-open-project="${esc(p.id)}" ${state.projectLoading||state.connecting?'disabled':''}>${state.projectLoading?'正在读取…':'进入课题 →'}</button></div></article>`).join('');
   $('alternate').innerHTML=service+'<div class="section-bar"><div><p class="eyebrow">PROJECT LIBRARY</p><h2>我的课题</h2><p class="home-caption">每个课题拥有自己的研究范围、文献和分析记录。</p></div></div><div class="project-grid">'+cards+(!unavailable?'<button class="project-create" id="altNew"><span>＋</span><strong>创建研究课题</strong><small>输入课题名称，确认研究范围</small></button>':'')+'</div>'+(!state.projects.length&&!unavailable?'<p class="home-empty">从第一个课题开始。创建后可修改研究范围，再选择要分析的论文篇数。</p>':'');
   $('altNew')?.addEventListener('click',()=>newProjectForm());$('homeReconnect')?.addEventListener('click',()=>connectionForm());$('alternate').querySelectorAll('[data-open-project]').forEach(b=>b.onclick=()=>selectProject(b.dataset.openProject));
   $('alternate').querySelectorAll('[data-delete-project]').forEach(b=>b.onclick=()=>deleteProjectForm(b.dataset.deleteProject));

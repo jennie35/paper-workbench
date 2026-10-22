@@ -122,6 +122,20 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn("待执行 · P1", page)
         self.assertNotIn("待执行 · completed", page)
 
+    def test_saved_summary_is_escaped_without_changing_evidence_or_reading_status(self):
+        draft = self.draft()
+        evidence_path = draft / "evidence.json"
+        evidence = workspace.read_json(evidence_path)
+        evidence["summary"] = 'Saved summary <img src=x onerror="unsafe()">'
+        evidence_bytes = workspace.json_bytes(evidence)
+        evidence_path.write_bytes(evidence_bytes)
+        registered = workspace.register(self.root, draft)
+        page = (self.root / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn('<img src=x onerror="unsafe()">', page)
+        self.assertIn("Saved summary &lt;img", page)
+        self.assertEqual((Path(registered["path"]) / "evidence.json").read_bytes(), evidence_bytes)
+        self.assertEqual(workspace.check(self.root)["complete_readings"], 0)
+
     def test_lock_prevents_concurrent_mutation(self):
         draft = self.draft()
         before = (self.root / "ledger.json").read_bytes()
