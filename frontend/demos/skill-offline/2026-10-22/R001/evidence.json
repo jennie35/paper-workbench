@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "synthetic": true,
+  "summary": "这是一条用于演示部分报告的虚构记录。已保存的仅是本地合成文字，没有真实全文、测量结果或原图，不能得出测量重复性的科学结论。",
+  "reading_scope": {
+    "acquired": [
+      "本地人工撰写的合成演示文字"
+    ],
+    "verified": [],
+    "unverified": [
+      "无真实论文身份",
+      "无真实全文或原图",
+      "无实验及统计结果",
+      "未应用外部精读技能"
+    ]
+  },
+  "sources": [
+    {
+      "source_id": "R001-S01",
+      "path": "source/synthetic-text.txt",
+      "sha256": "4cfc840250a469c385d729cc3c8b00b4224977777d7db688852dc48cdbc4a282",
+      "kind": "synthetic"
+    }
+  ],
+  "source_map": "source/source_map.json",
+  "original_images": [],
+  "visual_inspection_performed": false,
+  "reading_priorities": [
+    "示例定位：待取得真实全文的方法节、重复层级与误差定义；原因：判断技术重复与独立样本能否区分。当前尚无对应原文，未核验。"
+  ],
+  "actions": [
+    {
+      "id": "A01",
+      "title": "先补齐可追溯的方法与重复层级来源（合成行动）",
+      "status": "pending",
+      "priority": "P1",
+      "evidence_gap": "合成记录不包含真实方法、独立样本或误差定义。",
+      "question": "真实研究是否区分独立样本与技术重复？目前无法回答。",
+      "hypothesis": "待取得真实论文后再提出可否定的科学假设；本演示不补造。",
+      "method": "待执行：取得合法可读全文，逐项摘录实验单位、重复层级及其原文定位。",
+      "experimental_unit": "未知，须由真实方法节确认。",
+      "data": "当前只有合成示例文字，不能作为研究数据。",
+      "controls": "先对照正文、图注与补充方法；实验基线尚未报告。",
+      "confounds": "待核对同一样品多次测量是否被误当作独立样本。",
+      "supporting": "未来若明确报告独立实验单位和重复层级，可支持继续评估该证据。",
+      "weakening": "未来若来源不足或单位含混，应保留未核验并暂缓迁移。",
+      "criteria": "以可追溯原文为依据；当前没有数值阈值。",
+      "resources": "资源未知；先确认全文访问条件，不假设已有设备。",
+      "prerequisites": "真实论文及合法来源；当前均未提供。",
+      "deliverable": "待执行：来源定位与重复层级核对表。",
+      "stopping_criteria": "无法取得可靠全文时停止结论迁移并报告缺口。",
+      "sample_size_basis": "未知；有真实研究方案后依据文献或先导实验确定。"
+    }
+  ],
+  "claims": [],
+  "skill_application": {
+    "norman-paper-reading": "not_applied"
+  }
+}

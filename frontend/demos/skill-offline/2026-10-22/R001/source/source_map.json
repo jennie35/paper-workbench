@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "synthetic": true,
+  "source_id": "R001-S01",
+  "kind": "synthetic-demonstration-text",
+  "path": "synthetic-text.txt",
+  "sha256": "4cfc840250a469c385d729cc3c8b00b4224977777d7db688852dc48cdbc4a282",
+  "blocks": [
+    {
+      "id": "B001",
+      "locator": "synthetic-text.txt:1",
+      "text": "合成来源 S001。本文本专用于界面演示，不是真实论文摘要或正文。没有实施实验，没有设备、样本、结果、原图或公式。后续行动仅演示如何记录证据缺口。"
+    }
+  ],
+  "original_paper_obtained": false,
+  "visual_inspection_performed": false
+}

@@ -1,0 +1,59 @@
+{
+  "schema_version": "1.0",
+  "synthetic": true,
+  "summary": "这是一条仅候选的虚构题录，用于展示候选不等于完成精读。题录身份、发表状态、全文与验证数据均不存在真实来源，不能作为本课题的科学证据。",
+  "reading_scope": {
+    "acquired": [
+      "本地人工撰写的合成演示文字"
+    ],
+    "verified": [],
+    "unverified": [
+      "无真实论文身份",
+      "无真实全文或原图",
+      "无实验及统计结果",
+      "未应用外部精读技能"
+    ]
+  },
+  "sources": [
+    {
+      "source_id": "R002-S01",
+      "path": "source/synthetic-text.txt",
+      "sha256": "42e33795598b68baa72e787d54ca49fb287de3e15eedabfe7615cdcbfbabcfff",
+      "kind": "synthetic"
+    }
+  ],
+  "source_map": "source/source_map.json",
+  "original_images": [],
+  "visual_inspection_performed": false,
+  "reading_priorities": [
+    "示例定位：待核实真实来源后重点阅读数据划分与外部验证章节；原因：判断结论是否超出训练样本。当前没有可精读正文，未核验。"
+  ],
+  "actions": [
+    {
+      "id": "A01",
+      "title": "核实来源身份，再判断是否纳入（合成行动）",
+      "status": "pending",
+      "priority": "P2",
+      "evidence_gap": "当前是虚构题录，没有正式发表身份或正文。",
+      "question": "未来找到的真实研究是否有独立外部验证？",
+      "hypothesis": "尚不能提出基于此候选的科学假设。",
+      "method": "待执行：核对真实出版社身份与版本，再取得数据划分和验证协议。",
+      "experimental_unit": "未知；不得从题目推定。",
+      "data": "当前无真实数据。",
+      "controls": "需核对训练、调参与测试数据边界；基线未知。",
+      "confounds": "待核对数据泄漏、对象差异和指标定义。",
+      "supporting": "可核实身份及独立验证协议后才可继续分析。",
+      "weakening": "身份无法核实或缺少关键协议则不计完整精读。",
+      "criteria": "以可靠来源与实际正文覆盖判断，无预设数值门槛。",
+      "resources": "全文与资源条件未知。",
+      "prerequisites": "实际检索到的真实论文；本演示未执行检索。",
+      "deliverable": "待执行：身份与版本核对记录。",
+      "stopping_criteria": "来源不可靠时保留排除理由并停止纳入。",
+      "sample_size_basis": "待有真实研究问题与先导依据后确定。"
+    }
+  ],
+  "claims": [],
+  "skill_application": {
+    "norman-paper-reading": "not_applied"
+  }
+}

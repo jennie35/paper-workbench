@@ -1,0 +1,17 @@
+{
+  "schema_version": "1.0",
+  "synthetic": true,
+  "source_id": "R002-S01",
+  "kind": "synthetic-demonstration-text",
+  "path": "synthetic-text.txt",
+  "sha256": "42e33795598b68baa72e787d54ca49fb287de3e15eedabfe7615cdcbfbabcfff",
+  "blocks": [
+    {
+      "id": "B001",
+      "locator": "synthetic-text.txt:1",
+      "text": "合成来源 S002。只有演示题录与缺口说明，无真实 DOI、原文链接、摘要、全文或验证数据。禁止将其解释为实际检索到的论文。"
+    }
+  ],
+  "original_paper_obtained": false,
+  "visual_inspection_performed": false
+}
