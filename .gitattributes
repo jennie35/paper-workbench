@@ -20,3 +20,6 @@ frontend/vendor/* -whitespace
 # Keep upstream license formatting and shipped module line endings intact.
 frontend/vendor/pdfjs/** -whitespace
 frontend/vendor/pdfjs/legacy/build/*.mjs text eol=lf
+
+# Keep synthetic demo source fingerprints stable on Windows and Linux.
+frontend/demos/skill-offline/**/source/synthetic-text.txt text eol=lf

@@ -18,7 +18,7 @@
     {
       "source_id": "R002-S01",
       "path": "source/synthetic-text.txt",
-      "sha256": "42e33795598b68baa72e787d54ca49fb287de3e15eedabfe7615cdcbfbabcfff",
+      "sha256": "e92e6dd57588e903e5cfdac15cf55b96db9a3ca92739fecb2b85f9bad3a2e492",
       "kind": "synthetic"
     }
   ],

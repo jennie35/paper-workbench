@@ -4,7 +4,7 @@
   "source_id": "R001-S01",
   "kind": "synthetic-demonstration-text",
   "path": "synthetic-text.txt",
-  "sha256": "4cfc840250a469c385d729cc3c8b00b4224977777d7db688852dc48cdbc4a282",
+  "sha256": "4d2e30f46f70f6fff786754b002bcc8f2ccb79c26cdc0ecbc98e69fc5f517787",
   "blocks": [
     {
       "id": "B001",
