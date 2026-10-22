@@ -1,7 +1,7 @@
 import {createResearchSources,mergeSourcePaper,publicDocumentUrl} from './research-sources.js';
-import {normalizeResearchConfig,normalizeResearchLogic,buildReportPrompt,buildScopePrompt,buildSynthesisPrompt,normalizeSynthesis} from './research-contract.js?v=20261022-newtarget';
-import {createDirectoryWorkspaceStore} from './research-storage.js';
-import {researchFlowSvg,exportResearchMarkdown,exportOfflineHtml} from './research-export.js?v=20261022-cards';
+import {normalizeResearchConfig,normalizeResearchLogic,buildReportPrompt,buildScopePrompt,buildSynthesisPrompt,normalizeSynthesis} from './research-contract.js?v=20261022-reference';
+import {createDirectoryWorkspaceStore} from './research-storage.js?v=20261022-reference';
+import {researchFlowSvg,exportResearchMarkdown,exportOfflineHtml} from './research-export.js?v=20261022-reference';
 // Browser-owned records. Model credentials intentionally never enter this store.
 const DATABASE = 'paper-workbench-browser-v1';
 const LOCK = 'paper-workbench-browser-analysis-v1';

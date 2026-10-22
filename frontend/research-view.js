@@ -3,6 +3,7 @@ const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;
 const object=value=>value&&typeof value==='object'&&!Array.isArray(value)?value:{};
 const rows=value=>Array.isArray(value)?value.filter(x=>x!=null):[];
 // Omit empty presentation placeholders, never concrete uncertainty or limitations.
+const placeholderKey=value=>value.trim().replace(/[\s，,；;：:。.!！?？]/gu,'');
 const PLACEHOLDERS=new Set([
   '已取得的来源未报告或未核验，需核对原文','未报告或尚未核验；不自行补设','未记录；需补充实际来源',
   '当前来源不足以判断，需在精读中核对','未定位；需取得原文确认','尚未分开记录',
@@ -10,15 +11,39 @@ const PLACEHOLDERS=new Set([
   '未核验；不代替作者说明','核心图表及公式尚未定位或目视核验','无法由当前来源完成原图核验',
   '待核对正文、图注、表格及公式的一致性',
   '未提供真实样本','未指定真实设备','正式研究需从全文核对',
-]);
+  '已提供的来源未报告足够信息，需核对原文','证据不足时保留原判断',
+].map(placeholderKey));
 const placeholder=value=>{
   const s=value.trim().replace(/[。.!！]+$/u,'');
-  return !s||PLACEHOLDERS.has(s)||/^(?:未报告(?:或(?:尚未)?核验)?|尚未核验|未核验|未记录|未提供|无|暂无|待补充|待核对|未定位|不适用|未知|unknown|unreported|not reported|not available|not provided|not verified|not applicable|n\/?a|null|none|undefined|[-—–]+)$/iu.test(s)
+  return !s||PLACEHOLDERS.has(placeholderKey(s))||/^(?:未报告(?:或(?:尚未)?核验)?|尚未核验|未核验|未记录|未提供|无|暂无|待补充|待核对|未定位|不适用|未知|unknown|unreported|not reported|not available|not provided|not verified|not applicable|n\/?a|null|none|undefined|[-—–]+)$/iu.test(s)
     ||/^(?:not (?:reported|provided|available|verified)|unreported)(?: in| from| by)? (?:the )?(?:supplied |provided |available |current )?(?:abstract|paper|source|text|full ?text|materials?)$/iu.test(s)
     ||/^(?:(?:原文|论文|摘要|当前资料|已取得的来源|已取得来源)(?:中)?)?(?:未报告|未提供|未说明|未核验)(?:(?:具体)?(?:信息|数值|相关信息|设备(?:型号)?|样本量|统计方法|独立实验单位|参数|对照|随机化|盲法|重复次数))?$/u.test(s);
 };
 const content=value=>typeof value==='string'?(placeholder(value)?'':value.trim()):typeof value==='number'||typeof value==='boolean'?String(value):value==null?'':Array.isArray(value)?value.map(content).filter(Boolean).join('；'):Object.entries(value).flatMap(([key,item])=>{const text=content(item);return text?[`${key}：${text}`]:[];}).join('\n');
 export const hasReportContent=value=>Boolean(content(value));
+const referenceContent=value=>{
+  if(Array.isArray(value))return [...new Set(value.map(referenceContent).filter(Boolean))].join('；');
+  if(value&&typeof value==='object')return Object.entries(value).flatMap(([key,item])=>{const text=referenceContent(item);return text?[`${key}：${text}`]:[];}).join('\n');
+  const text=content(value),s=text.trim().replace(/[。.!！]+$/u,'');
+  // A generic evidence-acquisition task does not explain how a paper can help.
+  if(/^(?:先|需|需要|待)?(?:取得|获取|补充|补齐|核对|确认|阅读)(?:并(?:核对|阅读|确认))?(?:论文)?(?:原文|全文)(?:方法)?(?:[，,；; ]*(?:后|再|然后|之后|后再)?(?:判断|确认|评估)(?:其|本课题)?(?:是否|能否)?(?:适用|适用性|迁移|借鉴|具有参考价值))?$/u.test(s))return '';
+  return text;
+};
+const referenceFields=['project_reference','reference_value','topic_reference_value','project_relevance','topic_relevance','research_relevance','relevance_summary','future_insights','research_implications'];
+const firstReference=(...values)=>values.map(referenceContent).find(Boolean)||'';
+const transferValues=analysis=>[analysis.research_logic?.transfer_insights,analysis.research_logic?.transfer,analysis.transfer_insights,analysis.transfer].map(object).find(value=>Object.keys(value).length)||{};
+// Project value is a projection of saved analysis, never generated from a title.
+// Prefer a supplied topic-specific explanation over old structural defaults.
+export function referenceValue(analysis){
+  const a=object(analysis),logic=object(a.research_logic),transfer=transferValues(a);
+  for(const key of referenceFields){
+    const text=firstReference(a[key],logic[key]);if(text)return text;
+  }
+  const seen=new Set(),borrow=[['可以借鉴',firstReference(transfer.direct,transfer.direct_transfer)],['修改后验证',firstReference(transfer.adapt,transfer.adapt_then_validate)]].flatMap(([label,value])=>{
+    const text=referenceContent(value);if(!text||seen.has(text))return [];seen.add(text);return [`${label}：${text}`];
+  });
+  return borrow.join('；')||referenceContent(transfer.judgement_change)||referenceContent(transfer.judgment_change);
+}
 const present=value=>rows(value).filter(hasReportContent);
 const p=value=>hasReportContent(value)?`<p>${esc(content(value))}</p>`:'';
 const list=value=>Array.isArray(value)?(present(value).length?`<ul>${present(value).map(x=>`<li>${esc(content(x))}</li>`).join('')}</ul>`:''):p(value);
@@ -32,7 +57,7 @@ const ORIGIN_LABELS={paper_fact:'作者报告的结果',author_interpretation:'�
 Object.assign(DESIGN_LABELS,{study_type:'研究类型',repetition_levels:'重复层级',baselines_fairness:'基线公平性',ablation:'消融',derivations:'推导',key_propositions:'关键命题',evidence_classification:'证据分类',review_type:'综述类型'});
 
 export function reportSections(paper,{flowHtml='',visualHtml='',coverageHtml='',currentScope=null}={}){
-  const a=object(paper.analysis),r=object(a.research_logic),scope=object(r.reading_scope),story=object(r.storyline),design=object(r.study_design),layers=object(r.conclusion_layers),transfer=object(r.transfer_insights);
+  const a=object(paper.analysis),r=object(a.research_logic),scope=object(r.reading_scope),story=object(r.storyline),design=object(r.study_design),layers=object(r.conclusion_layers),transfer=transferValues(a);
   const type=design.type||r.paper_type||'unknown',sections=[],add=(id,title,html)=>{if(html)sections.push([id,title,html]);};
   const gaps=[...new Set([...present(a.verification_gaps),...present(a.unread)])];
   const verification=a.verification_status||paper.verification_status||(a.verified===true?'已记录完成核验（以实际核验记录为准）':'尚无已完成全部核验的记录');
@@ -74,7 +99,9 @@ export function reportSections(paper,{flowHtml='',visualHtml='',coverageHtml='',
     if(!details&&!locator)return '';
     return `<h3>${esc(locator||'精读项')}${x.kind?' · '+esc(({section:'章节',figure:'原图',table:'表格',equation:'公式',detail:'实验细节',code:'代码'})[x.kind]||x.kind):''}</h3>`+details+source(x.source_block_ids);
   }).join('')||list(a.reading_list));
-  add('future','10. 未来研究启示',p(a.future_insights)+dl([['可以直接借鉴',transfer.direct||transfer.direct_transfer],['需要修改后验证',transfer.adapt||transfer.adapt_then_validate],['目前不宜迁移',transfer.avoid||transfer.not_transferable],['如何改变本课题判断',transfer.judgement_change||transfer.judgment_change]])+titled('迁移条件',p(a.transfer_conditions))+titled('复现检查清单',list(a.reproduction_checklist)));
+  const insightTexts=new Set(),once=value=>{const text=content(value);if(!text||insightTexts.has(text))return '';insightTexts.add(text);return text;};
+  const referenceHtml=referenceFields.flatMap(key=>[a[key],r[key]]).map(value=>p(once(value))).join('')+dl([['可以直接借鉴',firstReference(transfer.direct,transfer.direct_transfer)],['需要修改后验证',firstReference(transfer.adapt,transfer.adapt_then_validate)],['目前不宜迁移',transfer.avoid||transfer.not_transferable],['如何改变本课题判断',transfer.judgement_change||transfer.judgment_change]].map(([label,value])=>[label,once(value)]));
+  add('future','10. 未来研究启示',titled('对本课题的参考借鉴',referenceHtml)+titled('迁移条件',p(a.transfer_conditions))+titled('复现检查清单',list(a.reproduction_checklist)));
   const actionCards=rows(a.actions||r.actions).map((row,i)=>{
     const x=object(row),details=dl([['证据缺口',x.gap],['待回答问题',x.question],['可被否定的假设',x.hypothesis],['方法与数据',x.method],['独立实验单位',x.experimental_unit],['所需数据',x.data],['基线与对照',x.controls],['混杂控制',x.confounds],['支持方向',x.supporting],['削弱或否定方向',x.weakening],['判断依据',x.criteria_basis||x.decision_rule],['样本量与阈值依据',x.sample_size_basis],['资源条件',x.resources],['前置条件',x.prerequisites],['交付成果',x.deliverable],['停止条件',x.stopping_criteria||x.stopping_condition]]);
     if(!details&&!hasReportContent(x.title))return '';

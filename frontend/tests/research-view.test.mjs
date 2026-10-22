@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {reportSections,synthesisHtml,hasReportContent} from '../research-view.js';
+import {reportSections,synthesisHtml,hasReportContent,referenceValue} from '../research-view.js';
 const paper={id:'D001',title:'Synthetic source report',doi:'10.5555/fixture',year:2026,publication_date:'2026-08',authors:['Fixture author'],analysis:{summary:'Actual source summary.',scientific_question:'A source-grounded question?',flow_steps:['Read actual source','Record gaps'],actions:[{id:'A01',title:'Obtain missing evidence',hypothesis:'A falsifiable proposed check',experimental_unit:'Independent specimen, not repeated sensor reads',stopping_criteria:'Stop if the reference cannot be identified',resources:'Unknown; do not invent devices',sample_size_basis:'Estimate in pilot',evidence_ids:['E01']}],evidence:[{id:'E01',claim:'A checked text claim',observation:'Actually provided text',source_block_ids:['B01'],interpretation:'Analyst inference',limits:'No original figure'}],verification_gaps:['Original figure unavailable'],research_logic:{paper_type:'method',study_design:{type:'method',fields:{train_test_split:'Independent split',data_leakage:'Must be checked',baselines_fairness:'Equal acquisition conditions'}},storyline:{author_question:'Author question',reconstructed_question:'Analyst reconstruction',gap:'Source gap'},design_decisions:[{id:'D01',decision:'Control acquisition',rationale_origin:'analyst',cost:'Lower throughput',alternative:'Separate calibration'}],reading_priorities:[{locator:'Methods 2.1',reason:'Check sample independence',decision_impact:'Whether comparison can transfer',source_block_ids:['B01']}],transfer_insights:{direct:'Preserve units',adapt:'Recalibrate for user system',avoid:'Do not claim measured truth from rendering',judgement_change:'Need an independent reference'}}}};
 
 test('report projection keeps actual analysis and publication-date precision without empty sections',()=>{
@@ -27,6 +27,49 @@ test('substantive uncertainty, zero counts and actual unverified evidence remain
   const limited={analysis:{verified:false,reading_basis:'实际摘要',research_logic:{study_design:{type:'experiment',fields:{samples:0,equipment:'未报告',controls:{reference:'An independent reference'}}},conclusion_layers:{analyst_inference:'Only technical repeats were reported; independence is unresolved.'},evidence_review:[{locator:'Figure 2',claim:'The reported trend comes from simulations, not measured parts.',verification_status:'unverified',uncertainty:'No independent specimen-level uncertainty was provided.'}]}}};
   const html=reportSections(limited).map(x=>x[2]).join('');
   assert.match(html,/实际摘要/);assert.match(html,/<dd>0<\/dd>/);assert.match(html,/independence is unresolved/);assert.match(html,/simulations, not measured parts/);assert.match(html,/此项核验记录：尚未核验/);assert.match(html,/No independent specimen-level uncertainty/);assert.doesNotMatch(html,/>已目视核验<|<dt>设备<\/dt>/);
+});
+
+test('reference value suppresses only exact legacy placeholders and keeps concrete limitations',()=>{
+  for(const value of ['已提供的来源未报告足够信息，需核对原文。',' 已提供的来源未报告足够信息, 需核对原文！ ','已提供的来源未报告足够信息；需核对原文','证据不足时保留原判断。']){
+    assert.equal(hasReportContent(value),false,value);
+    assert.equal(referenceValue({future_insights:value,research_logic:{transfer_insights:{judgement_change:value}}}),'');
+  }
+  const caveat='已提供的来源未报告足够信息，需核对原文；但可借鉴重复测量分层，在本课题区分设备漂移与独立样本差异。';
+  assert.equal(hasReportContent(caveat),true);
+  assert.equal(referenceValue({future_insights:caveat}),caveat);
+  assert.equal(referenceValue({future_insights:'可借鉴其校准协议，但该结论只有模拟证据，迁移前须在实物上验证。'}),'可借鉴其校准协议，但该结论只有模拟证据，迁移前须在实物上验证。');
+});
+
+test('reference value projects supplied transferable insights when future text is unavailable',()=>{
+  const a={future_insights:'已提供的来源未报告足够信息，需核对原文。',research_logic:{transfer_insights:{direct:['沿用独立样本与技术重复分层'],adapt:{method:'将校准协议用于本课题的测量流程',condition:'先核对设备量程'},judgement_change:'证据不足时保留原判断'}}};
+  const value=referenceValue(a);
+  assert.match(value,/可以借鉴：沿用独立样本与技术重复分层/);
+  assert.match(value,/修改后验证：method：将校准协议用于本课题的测量流程/);
+  assert.match(value,/先核对设备量程/);assert.doesNotMatch(value,/\[object Object\]|未报告足够信息|证据不足时保留原判断/);
+  const future=reportSections({analysis:a}).find(([id])=>id==='future')[2];
+  assert.match(future,/对本课题的参考借鉴/);assert.match(future,/沿用独立样本/);assert.match(future,/先核对设备量程/);assert.doesNotMatch(future,/未报告足够信息|证据不足时保留原判断/);
+});
+
+test('reference value prioritizes real future insight and report preserves unique transfer content',()=>{
+  const explanation='借鉴分层误差预算，用于本课题区分制造波动与测量重复性，独立样本单位须先确认。';
+  const a={future_insights:explanation,research_logic:{transfer_insights:{direct:explanation,adapt:'迁移前核对当前仪器量程',avoid:'渲染结果不能直接等同于实物测量',judgement_change:'证据不足时保留原判断'}}};
+  assert.equal(referenceValue(a),explanation);
+  const future=reportSections({analysis:a}).find(([id])=>id==='future')[2];
+  assert.equal(future.split(explanation).length-1,1);assert.match(future,/迁移前核对当前仪器量程/);assert.match(future,/渲染结果不能直接等同于实物测量/);
+  assert.equal(referenceValue({project_reference:{borrow:'分层校准',use:'用于当前测量协议'},future_insights:'A different saved paragraph'}),'borrow：分层校准\nuse：用于当前测量协议');
+  assert.equal(referenceValue({future_insights:[],research_logic:{transfer_insights:{direct:{detail:'未报告'},adapt:['unknown',null],judgement_change:'证据不足时保留原判断'}}}),'');
+});
+
+test('saved topic-reference aliases and nested values work without acquisition-only filler',()=>{
+  for(const key of ['reference_value','topic_reference_value','topic_relevance','research_relevance','research_implications']){
+    assert.equal(referenceValue({[key]:'借鉴分层取样，应用于当前稳定性比较。'}),'借鉴分层取样，应用于当前稳定性比较。');
+    assert.equal(referenceValue({research_logic:{[key]:'借鉴分层取样，应用于当前稳定性比较。'}}),'借鉴分层取样，应用于当前稳定性比较。');
+  }
+  for(const value of ['先取得全文再判断能否迁移','需核对原文。','待取得全文后判断适用性'])assert.equal(referenceValue({future_insights:value}),'');
+  const a={future_insights:[{direct:'借鉴独立样本分层，用于当前误差预算。',adapt:'先取得全文再判断能否迁移'},{conditions:'现有模型仅支持模拟，实物验证待执行。'}]};
+  assert.match(referenceValue(a),/独立样本分层/);assert.match(referenceValue(a),/仅支持模拟/);assert.doesNotMatch(referenceValue(a),/先取得全文/);
+  const legacy={research_logic:{transfer:{direct:'借鉴统计单位分层，用于当前重复性比较。'}}};
+  assert.match(referenceValue(legacy),/借鉴统计单位分层/);assert.match(reportSections({analysis:legacy}).find(([id])=>id==='future')[2],/借鉴统计单位分层/);
 });
 
 test('empty synthesis omits invented support, conflicts, priorities and boilerplate',()=>{

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import {activeStatuses,needsEvidence,summarizeBatch,paperIdsForBatch} from '../results.js';
-import {hasReportContent} from '../research-view.js';
+import {hasReportContent,referenceValue} from '../research-view.js';
 const code=readFileSync(new URL('../app.js',import.meta.url),'utf8');
 const extract=(start,end)=>{const a=code.indexOf(start),b=code.indexOf(end,a);assert.ok(a>=0&&b>a);return code.slice(a,b);};
 const el=()=>({value:'',dataset:{},hidden:false,classList:{toggle(){}},setAttribute(){},removeAttribute(){},querySelectorAll:()=>[],querySelector:()=>null,addEventListener(){}});
@@ -45,22 +45,27 @@ test('unverified saved reports render in the main report list even with zero ver
   assert.match($('cards').innerHTML,/Readable report/);assert.doesNotMatch($('cards').innerHTML,/尚无完成全部核验/);assert.match($('resultCount').textContent,/1 篇文献报告/);
 });
 
-test('cards expose saved content and topic relevance without fabricated empty fields',()=>{
+test('cards expose reference value and recover saved transfer advice without fabricating empty fields',()=>{
   const esc=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
   const state={mode:'direct',demo:false,view:'latest',jobs:[]};
-  const context=vm.createContext({state,esc,hasReportContent,tags:()=>[],badge:esc,reportLabel:()=> '摘要研究报告'});
+  const context=vm.createContext({state,esc,hasReportContent,referenceValue,tags:()=>[],badge:esc,reportLabel:()=> '摘要研究报告'});
   vm.runInContext(extract('function displayAnalysis(','function batchReportCounts('),context);
   vm.runInContext(extract('function paperCard(','function section('),context);
   const paper={id:'D001',title:'Saved paper',analysis:{summary:'Actual finding <script>unsafe()</script>',future_insights:'Change the topic measurement protocol.',research_logic:{transfer_insights:{judgement_change:'证据不足时保留原判断'}}}};
   const before=JSON.stringify(paper),html=context.paperCard(paper);
   assert.match(html,/Actual finding &lt;script&gt;/);assert.match(html,/Change the topic measurement protocol/);
+  assert.match(html,/对本课题的参考借鉴/);
   assert.match(html,/data-open-paper="D001"/);assert.match(html,/查看详细分析/);
   assert.doesNotMatch(html,/<script>|年份待确认|发表信息待确认|批次未记录|>已完成模型核验</);
   assert.doesNotMatch(html,/证据不足时保留原判断/);
   assert.equal(JSON.stringify(paper),before);
-  paper.analysis.future_insights='未报告';
+  paper.analysis.future_insights='已提供的来源未报告足够信息，需核对原文。';
+  paper.analysis.research_logic={transfer_insights:{direct:'借鉴分层对照设计，用于本课题区分材料与测量条件的影响。',judgement_change:'证据不足时保留原判断'}};
+  const recovered=context.paperCard(paper);
+  assert.match(recovered,/借鉴分层对照设计/);
+  assert.doesNotMatch(recovered,/已提供的来源未报告足够信息|证据不足时保留原判断/);
   paper.analysis.research_logic={};
-  assert.doesNotMatch(context.paperCard(paper),/card-relevance|课题相关总结/);
+  assert.doesNotMatch(context.paperCard(paper),/card-relevance|对本课题的参考借鉴/);
 });
 
 test('batch summary reports target and actual new count without reuse or shortfall counters',()=>{

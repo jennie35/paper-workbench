@@ -245,7 +245,9 @@ def available(value):
     """Suppress empty template placeholders without rewriting saved research."""
     if isinstance(value, str):
         value = value.strip()
-        return bool(value) and not re.fullmatch(r"(?:未报告|未核验|未知|未提供|未记录|暂无|不适用|待补充|待填写|none|null|n/?a|[-—–]+)[。.;；\s]*", value, re.I)
+        empty = r"(?:未报告|未核验|未知|未提供|未记录|暂无|不适用|待补充|待填写|none|null|n/?a|[-—–]+)[。.;；\s]*"
+        legacy = r"(?:(?:已提供的|现有|当前|所提供的)?(?:来源|资料|材料)(?:中)?(?:尚)?未(?:报告|提供)(?:足够|充分|可用|相关)?(?:信息|证据|内容)(?:[，,；;。]\s*(?:需|需要|尚需|待)(?:核对|查阅|查看|补充|取得|获取)(?:论文)?(?:原文|全文))?|(?:待|需|需要)(?:取得|获取|核对|查阅)(?:论文)?(?:全文|原文)(?:后(?:再)?分析)?)[。.;；\s]*"
+        return bool(value) and not re.fullmatch(empty, value, re.I) and not re.fullmatch(legacy, value)
     return value is not None and value != [] and value != {}
 
 
@@ -266,6 +268,52 @@ def note_section(text, terms):
         if any(term in match.group(1) for term in terms):
             lines = [line.strip() for line in match.group(2).splitlines() if available(line)]
             return " ".join(lines)
+    return ""
+
+
+def reference_text(value):
+    """Read saved transfer analysis, preferring concrete borrowing over a summary."""
+    if isinstance(value, dict):
+        keys = ("direct", "direct_transfer", "adapt", "adapt_then_validate", "what_to_borrow", "application_to_topic", "application",
+                "adaptation_conditions", "conditions", "evidence_basis", "basis", "avoid", "not_transferable",
+                "summary", "text", "insight", "implication", "description", "judgement_change", "judgment_change")
+        parts = [reference_text(value.get(key)) for key in keys]
+        return "；".join(dict.fromkeys(part for part in parts if part))
+    if isinstance(value, list):
+        return "；".join(dict.fromkeys(part for item in value if (part := reference_text(item))))
+    if isinstance(value, str):
+        # Legacy default sentences can occupy one paragraph ahead of a real insight.
+        lines = []
+        for line in value.splitlines():
+            key = re.sub(r"[\s，,；;：:。.!！?？]", "", line)
+            if not available(line) or key in {"证据不足时保留原判断", "已取得的来源未报告或未核验需核对原文"}:
+                continue
+            if re.fullmatch(r"(?:先|需|需要|待)?(?:取得|获取|补充|补齐|核对|确认|阅读)(?:并(?:核对|阅读|确认))?(?:论文)?(?:原文|全文)(?:方法)?(?:(?:后|再|然后|之后|后再)?(?:判断|确认|评估)(?:其|本课题)?(?:是否|能否)?(?:适用|适用性|迁移|借鉴|具有参考价值))?", key):
+                continue
+            lines.append(line.strip())
+        return " ".join(lines)
+    return ""
+
+
+def reference_value(evidence, note):
+    """Use existing analysis only; a title or a source-fetching task is no insight."""
+    logic = evidence.get("research_logic")
+    logic = logic if isinstance(logic, dict) else {}
+    keys = ("reference_value", "topic_reference_value", "project_reference", "topic_relevance", "project_relevance",
+            "relevance_summary", "research_relevance", "future_insights", "research_implications", "transfer_insights", "transfer")
+    for data in (evidence, logic):
+        for key in keys:
+            if result := reference_text(data.get(key)):
+                return result
+    terms = ("对本课题的参考借鉴", "可供本课题借鉴", "未来研究启示", "课题相关", "研究迁移", "Implications")
+    headings = list(re.finditer(r"(?m)^(#{1,4})\s+(.+)\n", note))
+    for index, match in enumerate(headings):
+        if not any(term in match.group(2) for term in terms):
+            continue
+        end = next((item.start() for item in headings[index + 1:] if len(item.group(1)) <= len(match.group(1))), len(note))
+        body = re.sub(r"(?m)^#{1,6}\s+.*$", "", note[match.end():end])
+        if result := reference_text(body):
+            return result
     return ""
 
 
@@ -432,10 +480,9 @@ def render(root, config, ledger):
         status_label = {"complete": "完成阅读", "partial": "部分报告", "candidate": "仅候选"}[meta["reading_status"]]
         summary = display_text(evidence.get("summary")) or note_section(text, ("论文总结", "简明总结", "Summary"))
         logic = logic if isinstance(logic, dict) else {}
-        relevance = next((value for data in (evidence, logic) for key in ("topic_relevance", "project_relevance", "research_relevance", "future_insights", "research_implications", "transfer_insights") if (value := display_text(data.get(key)))), "")
-        relevance = relevance or note_section(text, ("未来研究启示", "课题相关", "研究迁移", "Implications"))
+        relevance = reference_value(evidence, text)
         summary_html = f'<p class="record-summary">{esc(summary)}</p>' if summary else ""
-        relevance_html = f'<p class="record-relevance"><b>与本课题的联系</b>{esc(relevance)}</p>' if relevance else ""
+        relevance_html = f'<p class="record-relevance"><b>对本课题的参考借鉴</b>{esc(relevance)}</p>' if relevance else ""
         action_html = "".join(render_action(action) for action in actions_from(evidence))
         action_names = [str(action.get("title") or action.get("question") or "") for action in actions_from(evidence) if isinstance(action, dict)]
         action_names = [name for name in action_names if available(name)]

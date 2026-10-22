@@ -172,6 +172,64 @@ class WorkspaceTests(unittest.TestCase):
         self.assertIn('A saved, testable implication.', card)
         self.assertNotIn('A separate plan.', card)
 
+    def test_legacy_default_does_not_mask_saved_borrowing_and_conditions(self):
+        draft = self.draft()
+        evidence = {"topic_relevance": "已提供的来源未报告足够信息，需核对原文。", "future_insights": {
+            "summary": "现有来源未提供充分信息，需核对全文。",
+            "direct": "分析者建议：借鉴独立样本与技术重复分层的设计，用于本课题的重复性验证。",
+            "adapt": "先核对本课题的采样层级；来源未报告设备型号，不能据此选定设备。"}}
+        saved = workspace.json_bytes(evidence)
+        (draft / 'evidence.json').write_bytes(saved)
+        result = workspace.register(self.root, draft)
+        page = (self.root / 'index.html').read_text(encoding='utf-8')
+        card = page.split('<article ', 1)[1].split('</article>', 1)[0]
+        self.assertIn('对本课题的参考借鉴', card)
+        self.assertIn('独立样本与技术重复分层', card)
+        self.assertIn('来源未报告设备型号，不能据此选定设备。', card)
+        self.assertNotIn('需核对原文', card)
+        self.assertNotIn('需核对全文', card)
+        self.assertEqual((Path(result['path']) / 'evidence.json').read_bytes(), saved)
+
+    def test_borrowing_falls_back_to_saved_note_subsection_after_empty_default(self):
+        note = ('## 10. 未来研究启示\n已提供的来源未报告足够信息，需核对原文。\n'
+                '### 对本课题的参考借鉴\n分析者建议：借鉴外部验证的数据划分，用于检验跨对象泛化；须先确认对象可比。\n'
+                '## 11. 下一步研究规划\n另一个独立待办。')
+        actual = workspace.reference_value({"topic_relevance": "待取得全文后分析。"}, note)
+        self.assertIn('借鉴外部验证的数据划分', actual)
+        self.assertIn('须先确认对象可比', actual)
+        self.assertNotIn('未报告足够信息', actual)
+        self.assertNotIn('独立待办', actual)
+
+    def test_only_placeholders_hide_borrowing_instead_of_inventing_it_from_title(self):
+        draft = self.draft(title='独立样本分层设计与本课题')
+        (draft / 'evidence.json').write_bytes(workspace.json_bytes({"topic_relevance": "已提供的来源未报告足够信息，需核对原文。", "future_insights": {"direct": "未报告", "adapt": "待取得全文后分析。"}}))
+        workspace.register(self.root, draft)
+        page = (self.root / 'index.html').read_text(encoding='utf-8')
+        card = page.split('<article ', 1)[1].split('</article>', 1)[0]
+        self.assertNotIn('record-relevance', card)
+        self.assertNotIn('对本课题的参考借鉴', card)
+        self.assertNotIn('未报告足够信息', page)
+
+    def test_generic_judgment_and_source_tasks_are_not_borrowing_analysis(self):
+        for default in ('证据不足时保留原判断', '已取得的来源未报告或未核验，需核对原文。',
+                        '先取得全文再判断能否迁移', '先取得全文，再判断能否迁移。',
+                        '需获取论文原文后确认是否适用。'):
+            with self.subTest(default=default):
+                self.assertEqual(workspace.reference_text(default), '')
+        substantive = '先取得全文再判断能否迁移；具体应核对分层采样方案能否分离样本差异与测量误差。'
+        self.assertEqual(workspace.reference_text(substantive), substantive)
+
+    def test_legacy_transfer_aliases_use_saved_design_and_preserve_concrete_limits(self):
+        design = '分析者建议：将论文的分层采样设计用于本课题的重复性验证。'
+        limits = '作者未报告设备型号，不能据此选定设备；须先确认误差来源可比。'
+        for evidence in ({'transfer': {'direct_transfer': design, 'adapt_then_validate': limits}},
+                         {'research_logic': {'transfer': {'direct': design, 'adapt': limits, 'judgement_change': '证据不足时保留原判断'}}}):
+            with self.subTest(evidence=evidence):
+                result = workspace.reference_value(evidence, '')
+                self.assertIn(design, result)
+                self.assertIn(limits, result)
+                self.assertNotIn('证据不足时保留原判断', result)
+
     def test_empty_placeholders_do_not_create_report_sections_or_action_rows(self):
         self.assertEqual(workspace.render_action({"title": "未提供", "method": "未报告"}), "")
         self.assertEqual(workspace.display_text(["", "未报告", "A saved observation"]), "A saved observation")
