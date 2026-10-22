@@ -80,13 +80,14 @@ def test_infer_scope_accepts_question_alias_without_stale_inferred_core(logged, 
     assert next(p for p in saved if p['id'] == project['id'])['scope']['core_question'] == 'Synthetic topic'
 
 
-def test_reports_and_evidence_retain_all_eleven_sections_and_pending_action_details():
+def test_reports_preserve_analysis_and_pending_actions_without_empty_visual_section():
     a = analysis()
     a['research_logic'] = ResearchLogic().model_dump()
     a['project_context'] = {'project_id': 'synthetic-only', 'scope_snapshot': {'known_resources': 'Not confirmed at original reading'}}
     a['actions'][0].update(experimental_unit='Independent synthetic specimen', stopping_criteria='Stop if the baseline cannot be measured', data='Synthetic observations', question='Which uncertainty is reduced?')
     note = markdown_note(metadata(), a)
-    assert len([line for line in note.splitlines() if line.startswith('## ')]) == 11
+    assert len([line for line in note.splitlines() if line.startswith('## ')]) == 10
+    assert '## 7.' not in note
     assert '分析者绘制，非论文原图' in note
     assert '独立实验单位' in note and 'Stop if the baseline' in note
     assert 'Not confirmed at original reading' in note

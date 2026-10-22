@@ -14,6 +14,7 @@ from pypdf import PdfReader, PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
 from .config import MAX_PAGES
+from .visual_review import project_visual_evidence, report_visuals, DETAIL_FIELDS, meaningful
 
 WATERMARK = '分析采用 norman-paper-reading 技能｜作者：N同学｜小红书：N同学｜B站/抖音：耐心的N同学\nAnalysis performed using the norman-paper-reading skill | Author: N同学 | Xiaohongshu: N同学 | Bilibili/Douyin: 耐心的N同学'
 
@@ -84,6 +85,9 @@ def evidence_bundle(meta, analysis, source_map):
 
 
     result['research_logic'] = analysis.get('research_logic')
+    result['visuals'] = report_visuals(analysis)
+    if analysis.get('visual_review_audit'):
+        result['visual_review_audit'] = analysis['visual_review_audit']
     for key in ('doi', 'authors', 'journal', 'first_publication_date',
                 'first_publication_date_status', 'publication_date',
                 'publication_date_status', 'publication_date_precision',
@@ -139,15 +143,19 @@ def markdown_note(meta, a):
         fields(decision, {'decision':'作者选择', 'problem':'解决的问题', 'rationale':'选择理由', 'rationale_origin':'理由来源', 'cost':'引入的代价', 'alternative':'合理替代', 'source_block_ids':'来源块'})
     if not logic.get('design_decisions'):
         text.append('本记录尚未单独核验设计决策，不能推定作者动机。')
-    text.append('## 7. 精选原图、表格与公式核验')
-    for v in a.get('visuals', []):
-        text.extend(['### ' + v['label'], f'![原始整页，保留上下文](assets/page-{v["page"]}.png)',
-                     f'来源：PDF第 {v["page"]} 页；{v["kind"]}；原始整页可能包含相邻图表。',
-                     v['explanation'], '局限：' + v['limitations']])
-    for review in logic.get('evidence_review', []):
-        fields(review, {'kind':'证据类型', 'locator':'原文定位', 'claim':'支持的结论', 'comparison':'比较对象与面板', 'axes_units':'坐标与单位', 'statistical_unit':'统计单位', 'uncertainty':'效应与不确定性', 'consistency':'正文图注公式一致性', 'verification_status':'该条核验状态', 'source_block_ids':'来源块'})
-    if not a.get('visuals'):
-        text.append('未保存已实际查看的原图记录；取得或渲染图片不等于目视核验。')
+    visuals = report_visuals(a)
+    if visuals:
+        text.append('## 7. 精选原图、表格与公式核验')
+    for v in visuals:
+        text.extend(['### ' + v['label'], f'![原始整页，保留上下文]({v["asset_path"]})',
+                     f'来源：{v["locator"]}；{v["kind"]}；原始整页可能包含相邻图表。',
+                     '视觉模型核验 · 未经人工复核', v['explanation']])
+        if v.get('source_url'):
+            text.append('原文来源：' + v['source_url'])
+        if v['kind'] == 'equation' and meaningful(v.get('latex')):
+            text.append('原式转写（与原页对照）：\n\n$$\n' + v['latex'] + '\n$$')
+        labels = {'claim':'支持的结论', 'comparison':'比较对象与面板', 'axes_units':'坐标与单位', 'statistical_unit':'统计单位', 'uncertainty':'效应与不确定性', 'consistency':'正文图注公式一致性', 'purpose':'公式用途', 'symbols':'公式符号与单位', 'measurand':'被测量', 'applicability':'适用条件', 'panels':'子图', 'error_bars':'误差条', 'effect_size':'效应大小', 'limitations':'局限'}
+        fields({key: v[key] for key in (*DETAIL_FIELDS, 'limitations') if key != 'latex' and meaningful(v.get(key))}, labels)
     text.extend(['## 8. 结论、证据与局限', '### 作者报告的结果与解释', a['author_conclusions'], '### 分析者判断或推断', a['analyst_inference']])
     fields(logic.get('conclusion_layers') or {}, {'author_results':'作者报告的结果', 'author_interpretation':'作者解释', 'analyst_inference':'分析者推断', 'unverified_hypotheses':'尚待验证的假设'})
     for e in a['evidence']:
@@ -251,8 +259,17 @@ def export_zip(papers, kind, data_root, *, bundle=None):
     """One source note/evidence set feeds all exports. No credentials or PDFs."""
     stream = io.BytesIO()
     from .exporting import clean_export, offline_index, project_markdown
-    bundle = clean_export(bundle or {'schema_version': 2, 'project': {'name': '研究文献库'},
-                                    'papers': papers, 'jobs': [], 'references': []})
+    projected_papers = []
+    root = Path(data_root).resolve()
+    for p in papers:
+        folder = root / p['analysis']['artifact_dir']
+        if folder == root or folder.resolve() != folder or not folder.is_relative_to(root):
+            raise ValueError('无效导出路径')
+        projected_papers.append(dict(p, analysis=project_visual_evidence(p['analysis'], folder, p.get('url', ''))))
+    papers = projected_papers
+    bundle = dict(bundle or {'schema_version': 2, 'project': {'name': '研究文献库'},
+                            'jobs': [], 'references': []}, papers=papers)
+    bundle = clean_export(bundle)
     with zipfile.ZipFile(stream, 'w', zipfile.ZIP_DEFLATED) as z:
         frontend = Path(os.getenv('FRONTEND_DIR', str(Path(__file__).resolve().parents[2] / 'frontend')))
         math_ready = kind == 'html' and (frontend / 'vendor/temml.min.js').is_file()
@@ -264,21 +281,29 @@ def export_zip(papers, kind, data_root, *, bundle=None):
         index = []
         for p in papers:
             prefix = p['id']
-            folder = Path(data_root) / p['analysis']['artifact_dir']
-            if not folder.resolve().is_relative_to(Path(data_root).resolve()):
-                raise ValueError('无效导出路径')
+            folder = root / p['analysis']['artifact_dir']
             note = markdown_note(p, p['analysis'])
             z.writestr(prefix + '/reading-note.md', note)
-            for name in ['evidence.json', 'source/source_map.json']:
-                path = folder / name
-                if path.exists():
-                    z.write(path, prefix + '/' + name)
+            evidence_path = folder / 'evidence.json'
+            try:
+                evidence = json.loads(evidence_path.read_text('utf-8-sig')) if evidence_path.resolve() == evidence_path and evidence_path.is_file() else {}
+            except (OSError, ValueError):
+                evidence = {}
+            evidence = evidence if isinstance(evidence, dict) else {}
+            evidence.update(research_logic=p['analysis'].get('research_logic'),
+                            visuals=report_visuals(p['analysis']),
+                            visual_review_audit=p['analysis'].get('visual_review_audit', {}))
+            z.writestr(prefix + '/evidence.json', json.dumps(clean_export(evidence), ensure_ascii=False, indent=2))
+            source_path = folder / 'source/source_map.json'
+            if source_path.resolve() == source_path and source_path.is_file():
+                z.write(source_path, prefix + '/source/source_map.json')
             if kind == 'html':
                 body = rendered_note(note)
                 math = '<link rel="stylesheet" href="../vendor/Temml-Local.css"><script defer src="../vendor/temml.min.js"></script><script defer src="../math-init.js"></script>' if math_ready else ''
                 z.writestr(prefix + '/index.html', '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>'+html.escape(p['title'])+'</title>'+math+'<style>body{max-width:960px;margin:40px auto;padding:20px;font:17px/1.8 system-ui;color:#183b35}img{max-width:100%;height:auto}pre{white-space:pre-wrap}h2{margin-top:2em}</style><a href="../index.html">返回文献库</a>'+body+'</html>')
+            allowed_assets = {'research-flow.svg', *[Path(v['asset_path']).name for v in report_visuals(p['analysis'])]}
             for path in (folder / 'assets').glob('*'):
-                if path.suffix in ('.png', '.svg'):
+                if path.resolve() == path and path.is_file() and path.name in allowed_assets:
                     z.write(path, prefix + '/assets/' + path.name)
             index.append(f'<li><a href="{prefix}/index.html">{html.escape(p["title"])}</a></li>')
         z.writestr('papers.json', json.dumps(clean_export(papers), ensure_ascii=False, indent=2))

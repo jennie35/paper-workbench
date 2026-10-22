@@ -27,3 +27,14 @@ test('published demo preserves its fictional identity and cannot count as comple
   const records=['R001','R002'].map(id=>json(`2026-10-22/${id}/metadata.json`));assert.deepEqual(records.map(item=>item.reading_status),['partial','candidate']);
   for(const record of records){assert.equal(record.synthetic,true);assert.match(record.title,/合成/);assert.equal(record.doi,'');assert.ok(record.authors.every(author=>author.includes('虚构')));}
 });
+
+test('demo cards agree with current saved notes instead of resurrecting old generic borrowing prose',()=>{
+  const cards=[...html.matchAll(/<article\b[\s\S]*?<\/article>/g)].map(match=>match[0]);
+  const first=cards.find(card=>card.includes('data-open="reading-R001"')),second=cards.find(card=>card.includes('data-open="reading-R002"'));
+  assert.ok(first&&second);
+  const note=read('2026-10-22/R001/reading-note.md').toString('utf8');
+  assert.match(note,/若真实论文明确区分独立样本间差异/);assert.match(first,/若真实论文明确区分独立样本间差异/);
+  assert.doesNotMatch(second,/record-relevance/);assert.doesNotMatch(html,/可直接借鉴的是来源追溯/);
+  assert.match(html,/<span>Last updated<\/span>2026-10-22<\/p>/);
+  assert.match(html,/E01 · 来源记录/);assert.match(html,/C01 · 保存的判断/);
+});

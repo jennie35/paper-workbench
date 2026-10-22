@@ -11,9 +11,10 @@ export function apiOrigin(value) {
   }
 }
 
-export function configurationComplete(settings) {
+export function configurationComplete(settings,mode=settings?.mode) {
   return Boolean(settings?.configured === true && settings?.has_api_key === true
-    && nonempty(settings.base_url) && nonempty(settings.text_model) && nonempty(settings.vision_model));
+    && nonempty(settings.base_url) && nonempty(settings.text_model)
+    && (mode==='direct'||nonempty(settings.vision_model)));
 }
 
 export function scopeConfirmed(project) {
@@ -29,7 +30,7 @@ export function workflowState({demo = true, project = null, settings = null, act
   const connected = !demo;
   const hasProject = connected && Boolean(project);
   const hasScope = hasProject && scopeConfirmed(project);
-  const hasModels = connected && configurationComplete(settings);
+  const hasModels = connected && configurationComplete(settings,mode);
   let modelDescription = '填写服务商的接口地址、密钥和准确模型名。';
   if (hasModels) {
     modelDescription = settings.preflight?.ready === true

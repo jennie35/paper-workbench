@@ -49,11 +49,36 @@
       "prerequisites": "真实论文及合法来源；当前均未提供。",
       "deliverable": "待执行：来源定位与重复层级核对表。",
       "stopping_criteria": "无法取得可靠全文时停止结论迁移并报告缺口。",
-      "sample_size_basis": "未知；有真实研究方案后依据文献或先导实验确定。"
+      "sample_size_basis": "未知；有真实研究方案后依据文献或先导实验确定。",
+      "claim_ids": [
+        "C01"
+      ],
+      "evidence_ids": [
+        "E01"
+      ]
     }
   ],
-  "claims": [],
+  "claims": [
+    {
+      "id": "C01",
+      "text": "合成示例的分析者判断：本记录可演示文件组织，不能支持论文的科学结论。",
+      "evidence_ids": [
+        "E01"
+      ],
+      "synthetic": true
+    }
+  ],
   "skill_application": {
     "norman-paper-reading": "not_applied"
-  }
+  },
+  "evidence": [
+    {
+      "id": "E01",
+      "source_id": "R001-S01",
+      "locator": "source/synthetic-text.txt:1",
+      "observation": "合成来源明确说明：没有实施实验，没有真实样本、结果、原图或公式。",
+      "verification_status": "text_observed",
+      "synthetic": true
+    }
+  ]
 }

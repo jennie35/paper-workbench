@@ -16,6 +16,9 @@ article{position:relative;display:grid;grid-template-columns:128px minmax(0,1fr)
 @media(max-width:600px){.catalog-list{grid-template-columns:1fr;gap:16px}.catalog-list article{min-height:320px}.reader-dialog{width:calc(100vw - 20px);max-height:95dvh}.reader-toolbar{padding:13px 20px}.reader-content{padding:24px 23px 35px}.reader-content h2{font-size:28px}.reader-content .actions dl{display:block}.reader-content .actions dt{margin-top:10px}}
 @media print{.catalog-list{display:block}.catalog-list article{margin-bottom:20px}.reader-dialog[open]{position:static;max-height:none;width:auto;overflow:visible}.reader-toolbar{display:none}}
 
+.research-map{border:1px solid var(--line);padding:22px;margin:25px 0}.research-map h3{margin:0 0 10px}.analyst-label{font-size:10px;color:var(--muted);margin-bottom:18px}.research-flow,.evidence-path{list-style:none;padding:0;margin:0}.research-flow{counter-reset:step;display:flex;flex-wrap:wrap;gap:12px}.research-flow>li{counter-increment:step;flex:1 1 125px;position:relative;padding:14px;border:1px solid var(--line);background:#eeefed;font-size:12px}.research-flow>li:before{content:counter(step,decimal-leading-zero);display:block;color:var(--accent);font:19px var(--serif);margin-bottom:5px}.research-flow>li+li:after{content:'→';position:absolute;left:-12px;top:40%;color:var(--accent)}.evidence-path{margin-top:20px}.evidence-path>li{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;padding-top:16px;border-top:1px solid var(--line);margin-top:16px}.evidence-path>li.direct-link{grid-template-columns:repeat(2,minmax(0,1fr))}.evidence-path>li>div{min-width:0;position:relative;padding:13px;background:#eeefed;overflow-wrap:anywhere}.evidence-path>li>div+div:before{content:'→';position:absolute;left:-17px;top:40%;color:var(--accent)}.evidence-path small{font-size:9px;color:var(--accent)}.evidence-path p{font-size:11px;line-height:1.8;margin:7px 0 0}.verified-visual{padding:22px 0;border-top:1px solid var(--line)}.verified-visual figcaption{display:flex;justify-content:space-between;gap:16px;margin-bottom:16px}.verified-visual figcaption b{font-size:15px;color:var(--ink)}.verified-visual img{display:block;max-height:750px;margin:auto;border:1px solid var(--line)}.verified-visual p{font-size:12px;margin:14px 0 0}.visual-explanation{border-left:2px solid var(--accent);padding-left:14px}.verified-visual .visual-source{font-size:10px;color:var(--muted);overflow-wrap:anywhere}.formula-source{padding:14px;background:#eeefed;font-family:monospace}
+@media(max-width:600px){.research-map{padding:16px}.research-flow{display:block}.research-flow>li{margin-top:20px}.research-flow>li+li:after{content:'↓';left:50%;top:-24px}.evidence-path>li,.evidence-path>li.direct-link{grid-template-columns:1fr;gap:22px}.evidence-path>li>div+div:before{content:'↓';left:50%;top:-24px}.verified-visual figcaption{display:block}.verified-visual figcaption span{display:block;margin-top:5px}}
+
 </style></head><body data-view="recent"><header class="masthead"><div class="brand"><span class="brand-dot" aria-hidden="true">·</span>研序 <small>Paper Workbench</small></div><span class="local-label">本地研究档案 · OFFLINE LIBRARY</span></header>
 <div class="workspace"><aside class="sidebar"><p class="rail-label">Research index / 研究目录</p><nav aria-label="研究视图"><button data-view="recent" aria-pressed="true"><span class="nav-number" aria-hidden="true">I.</span>最近更新</button><button data-view="all" aria-pressed="false"><span class="nav-number" aria-hidden="true">II.</span>全部文献</button><button data-view="evidence" aria-pressed="false"><span class="nav-number" aria-hidden="true">III.</span>精选精读</button><button data-view="actions" aria-pressed="false"><span class="nav-number" aria-hidden="true">IV.</span>下一步研究</button></nav><p class="rail-note"><b>可追溯的阅读<br>有边界的推断<br>可检验的行动</b><span>Read. Question. Test.</span>从保存的证据出发，<br>让下一步研究有据可循。</p></aside>
 <main class="content"><section class="hero"><p class="eyebrow">Personal research library / 课题文献库</p><h1>技能衍生离线看板 · 合成演示</h1><div class="hero-bottom"><p class="research-question">仅界面演示：展示课题记录、证据缺口与待执行行动的组织方式；不含真实论文或科学发现。</p><dl class="library-stats"><div><dt>累计登记</dt><dd>02<span>篇</span></dd></div><div><dt>按保存状态完成阅读</dt><dd>00<span>篇</span></dd></div></dl></div><p class="target-count">目标新增 5 篇</p><p class="verification-note">阅读状态来自保存记录。结构检查不等于科学结论得到验证。</p></section>
@@ -48,10 +51,6 @@ article{position:relative;display:grid;grid-template-columns:128px minmax(0,1fr)
 ## 6. 关键设计决策
 
 没有可归于真实作者的设计选择、理由或替代方案。待取得真实论文后再重建，并记录正文定位。
-
-## 7. 精选原图、表格与公式核验
-
-原图、表格、公式均未取得或目视核验。示意 svg 是分析者绘制的合成说明，不是论文证据。
 
 ## 8. 结论、证据与局限
 
@@ -120,10 +119,6 @@ sample_size_basis：待有真实研究问题与先导依据后确定。
 ## 6. 关键设计决策
 
 没有可归于真实作者的设计选择、理由或替代方案。待取得真实论文后再重建，并记录正文定位。
-
-## 7. 精选原图、表格与公式核验
-
-原图、表格、公式均未取得或目视核验。示意 svg 是分析者绘制的合成说明，不是论文证据。
 
 ## 8. 结论、证据与局限
 
@@ -197,10 +192,6 @@ sample_size_basis：未知；有真实研究方案后依据文献或先导实验
 
 没有可归于真实作者的设计选择、理由或替代方案。待取得真实论文后再重建，并记录正文定位。
 
-## 7. 精选原图、表格与公式核验
-
-原图、表格、公式均未取得或目视核验。示意 SVG 是分析者绘制的合成说明，不是论文证据。
-
 ## 8. 结论、证据与局限
 
 作者报告结果：无真实论文。
@@ -238,7 +229,7 @@ sample_size_basis：待有真实研究问题与先导依据后确定。
 
 ## 来源与未完成核验
 
-来源仅为 source/synthetic-text.txt 及 source/source_map.json。无真实论文或原图；未调用模型、联网检索或 norman-paper-reading，不使用其完成署名。</pre></section><section class="selected"><h3>需要重点精读的证据</h3><ul><li>示例定位：待核实真实来源后重点阅读数据划分与外部验证章节；原因：判断结论是否超出训练样本。当前没有可精读正文，未核验。</li></ul></section><section class="actions"><h3>下一步研究 · 待执行</h3><ul><li><strong>核实来源身份，再判断是否纳入（合成行动）</strong> <span class="action-state">待执行 · P2</span><dl><dt>证据缺口</dt><dd>当前是虚构题录，没有正式发表身份或正文。</dd><dt>待回答问题</dt><dd>未来找到的真实研究是否有独立外部验证？</dd><dt>假设</dt><dd>尚不能提出基于此候选的科学假设。</dd><dt>方法</dt><dd>待执行：核对真实出版社身份与版本，再取得数据划分和验证协议。</dd><dt>实验单位</dt><dd>未知；不得从题目推定。</dd><dt>数据</dt><dd>当前无真实数据。</dd><dt>对照</dt><dd>需核对训练、调参与测试数据边界；基线未知。</dd><dt>混杂控制</dt><dd>待核对数据泄漏、对象差异和指标定义。</dd><dt>支持方向</dt><dd>可核实身份及独立验证协议后才可继续分析。</dd><dt>削弱方向</dt><dd>身份无法核实或缺少关键协议则不计完整精读。</dd><dt>判断依据</dt><dd>以可靠来源与实际正文覆盖判断，无预设数值门槛。</dd><dt>资源</dt><dd>全文与资源条件未知。</dd><dt>前置条件</dt><dd>实际检索到的真实论文；本演示未执行检索。</dd><dt>交付成果</dt><dd>待执行：身份与版本核对记录。</dd><dt>停止条件</dt><dd>来源不可靠时保留排除理由并停止纳入。</dd><dt>样本量依据</dt><dd>待有真实研究问题与先导依据后确定。</dd></dl></li></ul></section><details><summary>来源与图像文件</summary><ul><li><a href="2026-10-22/R002/source/source_map.json">source/source_map.json</a></li><li><a href="2026-10-22/R002/source/synthetic-text.txt">source/synthetic-text.txt</a></li></ul></details></div></dialog><dialog class="reader-dialog" id="reading-R001" aria-labelledby="title-R001"><div class="reader-toolbar"><span>R001 · 部分报告</span><button data-close="reading-R001" autofocus>关闭 · 返回文献库 ×</button></div><div class="reader-content"><h2 id="title-R001">【合成演示】测量重复性研究的报告结构示例</h2><p class="record-meta">虚构作者甲（合成演示） · 合成演示，无真实期刊或会议 · 2026</p><p class="record-summary">这是一条用于演示部分报告的虚构记录。已保存的仅是本地合成文字，没有真实全文、测量结果或原图，不能得出测量重复性的科学结论。</p><p class="record-relevance"><b>对本课题的参考借鉴</b>合成示例（分析者建议，非论文发现）：若真实论文明确区分独立样本间差异与同一样本的重复测量，可借鉴这种分层设计，用于本课题的重复性验证。迁移前须由实际方法节确认实验单位、采样层级和变异来源；这里仅展示借鉴分析的写法，尚未完成论文核验或实验。</p><div class="files"><a href="2026-10-22/R001/reading-note.md">阅读笔记</a><a href="2026-10-22/R001/evidence.json">证据 JSON</a><a href="2026-10-22/R001/metadata.json">题录与阅读状态</a></div><section><h3>研究分析</h3><pre># R001 · 【合成演示】测量重复性研究的报告结构示例
+来源仅为 source/synthetic-text.txt 及 source/source_map.json。无真实论文或原图；未调用模型、联网检索或 norman-paper-reading，不使用其完成署名。</pre></section><section class="selected"><h3>需要重点精读的证据</h3><ul><li>示例定位：待核实真实来源后重点阅读数据划分与外部验证章节；原因：判断结论是否超出训练样本。当前没有可精读正文，未核验。</li></ul></section><section class="actions"><h3>下一步研究 · 待执行</h3><ul><li><strong>核实来源身份，再判断是否纳入（合成行动）</strong> <span class="action-state">待执行 · P2</span><dl><dt>证据缺口</dt><dd>当前是虚构题录，没有正式发表身份或正文。</dd><dt>待回答问题</dt><dd>未来找到的真实研究是否有独立外部验证？</dd><dt>假设</dt><dd>尚不能提出基于此候选的科学假设。</dd><dt>方法</dt><dd>待执行：核对真实出版社身份与版本，再取得数据划分和验证协议。</dd><dt>实验单位</dt><dd>未知；不得从题目推定。</dd><dt>数据</dt><dd>当前无真实数据。</dd><dt>对照</dt><dd>需核对训练、调参与测试数据边界；基线未知。</dd><dt>混杂控制</dt><dd>待核对数据泄漏、对象差异和指标定义。</dd><dt>支持方向</dt><dd>可核实身份及独立验证协议后才可继续分析。</dd><dt>削弱方向</dt><dd>身份无法核实或缺少关键协议则不计完整精读。</dd><dt>判断依据</dt><dd>以可靠来源与实际正文覆盖判断，无预设数值门槛。</dd><dt>资源</dt><dd>全文与资源条件未知。</dd><dt>前置条件</dt><dd>实际检索到的真实论文；本演示未执行检索。</dd><dt>交付成果</dt><dd>待执行：身份与版本核对记录。</dd><dt>停止条件</dt><dd>来源不可靠时保留排除理由并停止纳入。</dd><dt>样本量依据</dt><dd>待有真实研究问题与先导依据后确定。</dd></dl></li></ul></section><details><summary>来源与图像文件</summary><ul><li><a href="2026-10-22/R002/source/source_map.json">source/source_map.json</a></li><li><a href="2026-10-22/R002/source/synthetic-text.txt">source/synthetic-text.txt</a></li></ul></details></div></dialog><dialog class="reader-dialog" id="reading-R001" aria-labelledby="title-R001"><div class="reader-toolbar"><span>R001 · 部分报告</span><button data-close="reading-R001" autofocus>关闭 · 返回文献库 ×</button></div><div class="reader-content"><h2 id="title-R001">【合成演示】测量重复性研究的报告结构示例</h2><p class="record-meta">虚构作者甲（合成演示） · 合成演示，无真实期刊或会议 · 2026</p><p class="record-summary">这是一条用于演示部分报告的虚构记录。已保存的仅是本地合成文字，没有真实全文、测量结果或原图，不能得出测量重复性的科学结论。</p><p class="record-relevance"><b>对本课题的参考借鉴</b>合成示例（分析者建议，非论文发现）：若真实论文明确区分独立样本间差异与同一样本的重复测量，可借鉴这种分层设计，用于本课题的重复性验证。迁移前须由实际方法节确认实验单位、采样层级和变异来源；这里仅展示借鉴分析的写法，尚未完成论文核验或实验。</p><div class="files"><a href="2026-10-22/R001/reading-note.md">阅读笔记</a><a href="2026-10-22/R001/evidence.json">证据 JSON</a><a href="2026-10-22/R001/metadata.json">题录与阅读状态</a></div><section class="research-map"><h3>研究脉络定位</h3><p class="analyst-label">分析者绘制，非论文原图；仅呈现保存的步骤与显式关联。</p><ol class="evidence-path"><li><div><small>E01 · 来源记录</small><p>合成来源明确说明：没有实施实验，没有真实样本、结果、原图或公式。（source/synthetic-text.txt:1）</p></div><div><small>C01 · 保存的判断</small><p>合成示例的分析者判断：本记录可演示文件组织，不能支持论文的科学结论。</p></div><div><small>A01 · 待执行</small><p>先补齐可追溯的方法与重复层级来源（合成行动）</p></div></li></ol></section><section><h3>研究分析</h3><pre># R001 · 【合成演示】测量重复性研究的报告结构示例
 
 &gt; 全部为合成演示，不是真实论文精读。
 
@@ -267,10 +258,6 @@ sample_size_basis：待有真实研究问题与先导依据后确定。
 ## 6. 关键设计决策
 
 没有可归于真实作者的设计选择、理由或替代方案。待取得真实论文后再重建，并记录正文定位。
-
-## 7. 精选原图、表格与公式核验
-
-原图、表格、公式均未取得或目视核验。示意 SVG 是分析者绘制的合成说明，不是论文证据。
 
 ## 8. 结论、证据与局限
 

@@ -65,7 +65,8 @@ export function createResearchSources({request,extractPdf}) {
     if(!response.ok)throw new Error(`OpenAlex DOI 补充不可用（HTTP ${response.status}）。`);
     const item=openAlexPaper(await response.json());if(!item||item.doi!==paper.doi)throw new Error('OpenAlex DOI 补充未匹配当前论文身份。');mergeSourcePaper(paper,item);paper.enrichment_attempted=true;
   }
-  async function acquire(paper,signal) {
+  async function acquire(paper,signal,{captureVisualPages=false}={}) {
+    if(signal?.aborted)throw new Error('全文获取已取消。');
     const diagnostics=paper.source_gaps||=[];
     for(const value of (paper.pdf_urls||[]).slice(0,2)){
       const url=publicDocumentUrl(value);if(!url)continue;
@@ -73,10 +74,10 @@ export function createResearchSources({request,extractPdf}) {
         const controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});const timer=setTimeout(abort,45000);
         let bytes;try{const response=await request(url,{},controller.signal,20000);if(!response.ok)throw new Error(`全文下载 HTTP ${response.status}`);bytes=await pdfBytes(response,controller.signal);}finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);}
         if(signal?.aborted)throw new Error('已取消');
-        const extracted=await extractPdf({name:'article.pdf',size:bytes.length,arrayBuffer:async()=>bytes.buffer});
+        const extracted=await extractPdf({name:'article.pdf',size:bytes.length,arrayBuffer:async()=>bytes.buffer},{signal,captureVisualPages});
         if(signal?.aborted)throw new Error('已取消');
         if(!textIdentity(extracted,paper))throw new Error('下载文字未匹配 DOI 或论文标题，未作为全文使用');
-        const blocks=pageBudget(extracted);return {basis:'fulltext',blocks,url,sha256:extracted.sha256,pages:extracted.pages,unread_pages:extracted.unread_pages||[],warnings:extracted.warnings||[],characters_available:extracted.text_characters,characters_sent:blocks.reduce((sum,x)=>sum+x.text.length,0)};
+        const blocks=pageBudget(extracted);return {basis:'fulltext',blocks,url,sha256:extracted.sha256,pages:extracted.pages,unread_pages:extracted.unread_pages||[],warnings:extracted.warnings||[],characters_available:extracted.text_characters,characters_sent:blocks.reduce((sum,x)=>sum+x.text.length,0),...(captureVisualPages?{page_images:(extracted.page_images||[]).filter(image=>image.source_sha256===extracted.sha256).slice(0,3)}:{})};
       }catch(error){if(signal?.aborted)throw error;diagnostics.push('开放全文：'+error.message);}
     }
     if(paper.abstract){const abstract=paper.abstract.slice(0,60000);return {basis:'abstract',blocks:[{id:'ABSTRACT-1',page:null,locator:(paper.abstract_source||paper.source)+' abstract',text:abstract}],url:paper.url,pages:0,unread_pages:[],warnings:diagnostics,characters_available:paper.abstract.length,characters_sent:abstract.length};}

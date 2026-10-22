@@ -116,8 +116,9 @@ def test_candidate_partial_content_without_false_completion(logged):
     assert 'artifact_dir' not in data['analysis']
     assert data['reading_notes'][0]['notes'] == 'Generated fixture notes'
     assert data['artifacts']['image_pages'] == [1, 2]
-    assert data['artifacts']['checked_visual_pages'] == [1]
-    assert data['analysis']['visuals'] == [dict(observed, page=1)]
+    # Legacy readable=true is a model assertion, not an application receipt.
+    assert data['artifacts']['checked_visual_pages'] == []
+    assert data['analysis']['visuals'] == []
     assert logged.get(f'/api/jobs/{jid}/candidates/0/assets/page-1.png').content == b'synthetic-image'
     flow = logged.get(f'/api/jobs/{jid}/candidates/0/assets/research-flow.svg')
     assert flow.status_code == 200

@@ -50,3 +50,11 @@ test('without any retrieved text a candidate yields no source; cancellation neve
   const controller=new AbortController();const sources=createResearchSources({extractPdf:async()=>extracted(),request:async()=>{controller.abort();throw new Error('aborted fixture');}});await assert.rejects(sources.acquire(openAlexPaper(oa()),controller.signal),/aborted/);
   assert.equal(await sources.acquire(openAlexPaper(oa({abstract_inverted_index:null,primary_location:{}}))),null);
 });
+
+test('source page rendering is opt-in, signal-aware, identity-matched and limited to the actual PDF fingerprint',async()=>{
+  const calls=[],controller=new AbortController();
+  const sources=createResearchSources({request:async()=>pdf(),extractPdf:async(_file,options)=>{calls.push(options);return extracted({page_images:[{page:1,source_sha256:'f'.repeat(64)},{page:2,source_sha256:'incorrect'},{page:3,source_sha256:'f'.repeat(64)}]});}});
+  const source=await sources.acquire(openAlexPaper(oa()),controller.signal,{captureVisualPages:true});assert.equal(calls[0].captureVisualPages,true);assert.equal(calls[0].signal,controller.signal);assert.deepEqual(source.page_images.map(row=>row.page),[1,3]);assert.equal(source.verified,undefined);
+  const normal=await sources.acquire(openAlexPaper(oa()));assert.equal(calls[1].captureVisualPages,false);assert.equal(normal.page_images,undefined);
+  controller.abort();await assert.rejects(sources.acquire(openAlexPaper(oa()),controller.signal),/取消/);assert.equal(calls.length,2);
+});

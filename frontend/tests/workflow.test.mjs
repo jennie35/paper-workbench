@@ -40,6 +40,16 @@ test('inferred or empty scopes cannot launch a batch, but a confirmed question o
   assert.equal(scopeConfirmed({...project,scope:{inferred:false,research_question:'',keywords:'keyword'}}),false);
 });
 
+test('direct text-only configuration can start a batch while backend still requires a visual model',()=>{
+  const direct={...settings,mode:'direct',vision_model:''};
+  assert.equal(configurationComplete(direct),true);
+  assert.equal(state({mode:'direct',settings:direct}).action,'batch');
+  assert.equal(state({mode:'direct',settings:{...settings,vision_model:''}}).action,'batch');
+  assert.equal(configurationComplete({...direct,text_model:''}),false);
+  assert.equal(configurationComplete({...direct,has_api_key:false}),false);
+  assert.equal(configurationComplete({...direct,mode:'backend'}),false);
+});
+
 test('an instance-wide active job takes precedence even when it belongs to a different project', () => {
   const activeJob = {id:'job-b',project_id:'project-b',status:'running'};
   assert.equal(state({activeJob}).action,'active');

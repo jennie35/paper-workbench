@@ -100,3 +100,32 @@ test('registered worker cleanup runs after page failures and progress callback e
   const extract=createReferencePdfExtractor({cryptoImpl:webcrypto,loadDocument:async(_,context)=>{context.registerCleanup(()=>{cleaned+=1;});return {promise:Promise.resolve({numPages:1,getPage:async()=>({getTextContent:async()=>({items:text('Usable text')}),cleanup(){}})})};}});
   const result=await extract(file(),{onProgress:()=>{throw new Error('UI bug');}});assert.equal(result.text_page_count,1);assert.equal(cleaned,1);
 });
+
+const sourcePng='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=';
+function renderFixture({dataUrl=sourcePng,stall=false}={}){
+  const state={rendered:[],canvases:[],destroyed:0,cancelled:0};let renderStarted;
+  const started=new Promise(resolve=>{renderStarted=resolve;});
+  const document={numPages:5,getPage:async number=>({getTextContent:async()=>({items:text(number===1?'Actual article title':`Figure ${number} caption Table ${number} (fixture)`)}),getViewport:({scale})=>({width:2400*scale,height:3200*scale}),render:()=>{state.rendered.push(number);renderStarted();return {promise:stall?new Promise(()=>{}):Promise.resolve(),cancel(){state.cancelled++;}};},cleanup(){}})};
+  const extract=createReferencePdfExtractor({cryptoImpl:webcrypto,loadDocument:async()=>({promise:Promise.resolve(document),destroy:async()=>state.destroyed++}),canvasFactory:()=>{const canvas={width:0,height:0,getContext:()=>({}),toDataURL:()=>dataUrl};state.canvases.push(canvas);return canvas;}});
+  return {extract,state,started};
+}
+
+test('explicit paper rendering captures at most three bounded source pages with actual image and PDF fingerprints, never inspection stamps',async()=>{
+  const {extract,state}=renderFixture(),sizes=[];const source=file();
+  const result=await extract(source,{captureVisualPages:true,onProgress:event=>{if(event.stage==='rendering')sizes.push(state.canvases.at(-1).width*state.canvases.at(-1).height);}});
+  assert.deepEqual(state.rendered,[2,3,4]);assert.equal(result.page_images.length,3);assert.equal(result.extraction_status,'text-with-rendered-pages');
+  for(const image of result.page_images){assert.equal(image.source_sha256,result.sha256);assert.equal(image.image_sha256,createHash('sha256').update(Buffer.from(sourcePng.split(',')[1],'base64')).digest('hex'));assert.ok(image.width<=1400&&image.height<=1400);assert.equal(image.inspection_status,undefined);}
+  assert.ok(sizes.every(pixels=>pixels<=1_600_000));assert.equal(state.destroyed,1);assert.ok(state.canvases.every(canvas=>canvas.width===0&&canvas.height===0));
+  const reference=renderFixture();const textOnly=await reference.extract(file());assert.deepEqual(reference.state.rendered,[]);assert.equal(textOnly.page_images,undefined);
+});
+
+test('failed or oversized rendering retains source text without fabricated images or visual verification',async()=>{
+  const {extract,state}=renderFixture({dataUrl:'data:image/png;base64,'+'A'.repeat(2_100_000)}),result=await extract(file(),{captureVisualPages:true});
+  assert.equal(result.text_page_count,5);assert.deepEqual(result.page_images,[]);assert.equal(result.extraction_status,'text-only');assert.match(result.warnings.join(' '),/图像未取得/);assert.equal(result.verified,undefined);assert.equal(state.destroyed,1);
+});
+
+test('cancelling a stalled source-page render settles promptly and destroys rendering resources',async()=>{
+  const {extract,state,started}=renderFixture({stall:true}),controller=new AbortController(),pending=extract(file(),{captureVisualPages:true,signal:controller.signal});
+  await started;controller.abort();await assert.rejects(pending,error=>error.code==='cancelled');assert.equal(state.cancelled,1);assert.equal(state.destroyed,1);
+  const alreadyCancelled=renderFixture(),cancelled=new AbortController();cancelled.abort();await assert.rejects(alreadyCancelled.extract(file(),{signal:cancelled.signal}),error=>error.code==='cancelled');assert.deepEqual(alreadyCancelled.state.rendered,[]);
+});

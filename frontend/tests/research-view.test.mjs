@@ -23,10 +23,11 @@ test('nested empty and placeholder values do not create fields or report section
   assert.deepEqual(sections.map(x=>x[0]),['scope']);assert.match(html,/核验状态/);assert.doesNotMatch(html,/已目视核验|A01|D01|<dl>|实际资料/);
 });
 
-test('substantive uncertainty, zero counts and actual unverified evidence remain visible',()=>{
+test('unverified visual analysis is omitted while text boundaries and zero counts remain visible',()=>{
   const limited={analysis:{verified:false,reading_basis:'实际摘要',research_logic:{study_design:{type:'experiment',fields:{samples:0,equipment:'未报告',controls:{reference:'An independent reference'}}},conclusion_layers:{analyst_inference:'Only technical repeats were reported; independence is unresolved.'},evidence_review:[{locator:'Figure 2',claim:'The reported trend comes from simulations, not measured parts.',verification_status:'unverified',uncertainty:'No independent specimen-level uncertainty was provided.'}]}}};
   const html=reportSections(limited).map(x=>x[2]).join('');
-  assert.match(html,/实际摘要/);assert.match(html,/<dd>0<\/dd>/);assert.match(html,/independence is unresolved/);assert.match(html,/simulations, not measured parts/);assert.match(html,/此项核验记录：尚未核验/);assert.match(html,/No independent specimen-level uncertainty/);assert.doesNotMatch(html,/>已目视核验<|<dt>设备<\/dt>/);
+  assert.match(html,/实际摘要/);assert.match(html,/<dd>0<\/dd>/);assert.match(html,/independence is unresolved/);assert.doesNotMatch(html,/simulations, not measured parts|此项核验记录：尚未核验|No independent specimen-level uncertainty|>已目视核验<|<dt>设备<\/dt>/);
+  assert.equal(limited.analysis.research_logic.evidence_review.length,1,'raw audit remains intact');
 });
 
 test('reference value suppresses only exact legacy placeholders and keeps concrete limitations',()=>{

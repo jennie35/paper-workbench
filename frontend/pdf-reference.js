@@ -1,4 +1,6 @@
-// PDF reference text extraction only. No rendering, OCR, model call or file upload.
+import {selectVisualPages,imageSha256,sourceImageBytes} from './paper-visuals.js?v=20261022-visuals1';
+// References default to text only. Explicit paper analysis may capture bounded
+// source page images; rendering never marks those pages visually inspected.
 const MAX_BYTES = 50 * 1024 * 1024;
 const MAX_PAGES = 300;
 const TIMEOUT_MS = 120_000;
@@ -33,6 +35,7 @@ function pageText(items) {
 
 function readableError(error) {
   if (error instanceof ReferencePdfError) return error;
+  if (error?.name === 'AbortError') return new ReferencePdfError('PDF 解析已取消。', 'cancelled');
   if (error?.name === 'PasswordException') {
     return new ReferencePdfError('此 PDF 已加密或需要密码。请先在本机解密并另存后再添加。', 'encrypted');
   }
@@ -103,8 +106,9 @@ export function createReferencePdfExtractor({
   loadDocument = loadPdfDocument,
   cryptoImpl = globalThis.crypto,
   timeoutMs = TIMEOUT_MS,
+  canvasFactory = () => globalThis.document?.createElement('canvas'),
 } = {}) {
-  return async function extract(file, {onProgress} = {}) {
+  return async function extract(file, {onProgress,signal,captureVisualPages=false} = {}) {
     if (!file || !Number.isFinite(file.size) || typeof file.arrayBuffer !== 'function') {
       throw new ReferencePdfError('请选择一个 PDF 文件。', 'missing-file');
     }
@@ -112,8 +116,12 @@ export function createReferencePdfExtractor({
     if (file.size < 8) throw new ReferencePdfError('文件不是有效的 PDF。', 'invalid');
     if (!cryptoImpl?.subtle?.digest) throw new ReferencePdfError('当前页面无法计算文件指纹，请通过 HTTPS 或本机地址打开看板。', 'crypto-unavailable');
     const controller = new AbortController(), cleanups = [];
+    let rejectAbort;
+    const aborted = new Promise((_, reject) => {rejectAbort=reject;});
     let task, cancelled = false, timer;
     const ensureActive = () => { if (cancelled) throw controller.signal.reason; };
+    const abort = () => {cancelled=true;const error=new ReferencePdfError('PDF 解析已取消。','cancelled');controller.abort(error);rejectAbort(error);};
+    if(signal?.aborted)abort();else signal?.addEventListener('abort',abort,{once:true});
     const registerCleanup = cleanup => {
       if (cancelled) void boundedCleanup(cleanup);
       else cleanups.push(cleanup);
@@ -177,15 +185,42 @@ export function createReferencePdfExtractor({
         if (failed_pages.length === pages) throw new ReferencePdfError('PDF 所有页面均解析失败，无法可靠读取。请重新导出有效 PDF 后再添加。', 'invalid');
         throw new ReferencePdfError('未提取到可用文字。此文件可能是扫描件或图像型 PDF，请先完成 OCR 后再添加。', 'needs-ocr');
       }
-      const warnings = [TEXT_ONLY_WARNING];
+      const warnings = [captureVisualPages?'已提取 PDF 文字，并尝试渲染选定页图；渲染本身不代表原图或公式已核验。':TEXT_ONLY_WARNING];
       if (unread_pages.length) warnings.push(`第 ${unread_pages.join('、')} 页没有可提取文字或无法读取，未将这些页面纳入研究范围依据。`);
       if (failed_pages.length) warnings.push(`第 ${failed_pages.join('、')} 页解析失败；已保留其他可读取页面的文字。`);
-      return {sha256, pages, text_pages, text_characters, text_page_count: text_pages.length, unread_pages, warnings, extraction_status: 'text-only'};
+      const page_images=[];
+      if(captureVisualPages){
+        for(const pageNumber of selectVisualPages(text_pages)){
+          ensureActive();let page,canvas,renderTask;
+          const cancelRender=()=>{try{renderTask?.cancel();}catch{}if(canvas){canvas.width=0;canvas.height=0;}};
+          controller.signal.addEventListener('abort',cancelRender,{once:true});
+          try{
+            page=await document.getPage(pageNumber);ensureActive();
+            const original=page.getViewport({scale:1});
+            if(!Number.isFinite(original.width)||!Number.isFinite(original.height)||original.width<=0||original.height<=0)throw new Error('页面尺寸无效');
+            const scale=Math.min(1400/Math.max(original.width,original.height),Math.sqrt(1_600_000/(original.width*original.height)));
+            const viewport=page.getViewport({scale});canvas=canvasFactory();
+            if(!canvas?.getContext||!canvas?.toDataURL)throw new Error('页面图像组件不可用');
+            canvas.width=Math.max(1,Math.floor(viewport.width));canvas.height=Math.max(1,Math.floor(viewport.height));
+            const context=canvas.getContext('2d',{alpha:false});if(!context)throw new Error('页面画布不可用');
+            renderTask=page.render({canvasContext:context,viewport,background:'#ffffff'});await renderTask.promise;ensureActive();
+            let image_data_url=canvas.toDataURL('image/png');
+            if(!sourceImageBytes(image_data_url))image_data_url=canvas.toDataURL('image/jpeg',0.72);
+            const image=sourceImageBytes(image_data_url),image_sha256=await imageSha256(image_data_url,cryptoImpl);ensureActive();
+            if(!image||!image_sha256)throw new Error('页面图像超过大小上限或格式无效');
+            page_images.push({page:pageNumber,mime:image.mime,image_data_url,image_sha256,source_sha256:sha256,width:canvas.width,height:canvas.height});
+            report(onProgress,{stage:'rendering',page:pageNumber,totalPages:pages});
+          }catch(error){ensureActive();warnings.push(`PDF 第 ${pageNumber} 页图像未取得：${error.message}`);}
+          finally{controller.signal.removeEventListener('abort',cancelRender);try{page?.cleanup();}catch{}if(canvas){canvas.width=0;canvas.height=0;}}
+        }
+      }
+      return {sha256, pages, text_pages, text_characters, text_page_count: text_pages.length, unread_pages, warnings, extraction_status:page_images.length?'text-with-rendered-pages':'text-only',...(captureVisualPages?{page_images}: {})};
     })();
-    try { return await Promise.race([extraction, timeout]); }
+    try { return await Promise.race([extraction, timeout, aborted]); }
     catch (error) { throw readableError(error); }
     finally {
       clearTimeout(timer);
+      signal?.removeEventListener('abort',abort);
       // The injected loader contract may register extra worker resources. Always
       // destroy the loading task as well, including password and page-count errors.
       cancelled = true;

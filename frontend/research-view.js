@@ -1,4 +1,5 @@
 // Pure, escaped HTML projections of saved research records; no model calls.
+import {researchFlowSvg,designMap,storylineMap,evidenceActionMap} from './research-diagrams.js?v=20261022-visuals1';
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const object=value=>value&&typeof value==='object'&&!Array.isArray(value)?value:{};
 const rows=value=>Array.isArray(value)?value.filter(x=>x!=null):[];
@@ -50,14 +51,51 @@ const list=value=>Array.isArray(value)?(present(value).length?`<ul>${present(val
 const dl=values=>{const items=values.filter(([,value])=>hasReportContent(value));return items.length?`<dl>${items.map(([label,value])=>`<dt>${esc(label)}</dt><dd>${esc(content(value))}</dd>`).join('')}</dl>`:'';};
 const source=value=>present(value).length?`<p class="reader-meta">来源定位：${esc(present(value).join(' · '))}</p>`:'';
 const titled=(title,html)=>html?`<h3>${esc(title)}</h3>${html}`:'';
+const sha=value=>typeof value==='string'&&/^[a-f0-9]{64}$/i.test(value);
+const numberedOriginal=(kind,label)=>{
+  const number='(?:[A-Z]\\.?\\d+(?:[.\\-]\\d+)*[a-z]?|\\d+(?:[.\\-]\\d+)*[a-z]?|[IVXLCDM]+|[一二三四五六七八九十百]+)(?![A-Za-z0-9])';
+  const prefix={figure:'(?:fig(?:ure)?\\.?|图)',table:'(?:table|表)',equation:'(?:eq(?:uation)?\\.?|公式|式)'}[kind];
+  return Boolean(prefix&&(new RegExp(prefix+'\\s*[（(]?'+number,'iu').test(label)||(kind==='equation'&&new RegExp('^[（(]?'+number+'[）)]?$','iu').test(label))));
+};
+export const safeOriginalImage=value=>typeof value==='string'&&value.length<=3000000&&/^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/.test(value)?value:'';
+// Verification is supplied by the application after an image request, never by
+// the language model's evidence_review status or a PDF download alone.
+export function verifiedOriginals(analysis){
+  const a=object(analysis),expected=a.source_metadata?.sha256||a.coverage?.pdf_sha256;
+  return rows(a.visuals).map(object).filter(v=>{
+    const page=Number(v.page||v.source_page),label=content(v.label||v.locator);
+    return v.inspection_status==='verified'&&['vision_model','manual','visual_tool'].includes(v.inspection_method)
+      &&typeof v.inspection_id==='string'&&v.inspection_id.length>0&&typeof v.inspected_at==='string'&&Number.isFinite(Date.parse(v.inspected_at))
+      &&Number.isInteger(page)&&page>=1&&page<=300&&Number(v.source_page||page)===page
+      &&sha(v.image_sha256)&&sha(v.source_sha256)&&(!sha(expected)||expected.toLowerCase()===v.source_sha256.toLowerCase())
+      &&['figure','table','equation'].includes(v.kind||v.type)&&hasReportContent(v.explanation)
+      &&numberedOriginal(v.kind||v.type,label)
+      &&(v.asset_path===`assets/page-${page}.png`||v.asset_path===`assets/page-${page}.jpg`);
+  });
+}
+export function originalsHtml(analysis,{mode='asset',mathRenderer=globalThis.temml?.renderToString}={}){
+  return verifiedOriginals(analysis).map(v=>{
+    const page=Number(v.page||v.source_page),data=safeOriginalImage(v.image_data_url),filename=v.asset_path.split('/').pop();
+    if(mode==='embedded'&&!data)return '';
+    const image=mode==='asset'?`data-asset="${esc(filename)}"`: `src="${esc(mode==='embedded'?data:v.asset_path)}"`;
+    const url=(()=>{try{const u=new URL(v.source_url);return /^https?:$/.test(u.protocol)&&!u.username&&!u.password?u.href:'';}catch{return '';}})();
+    const details=dl([['比较对象',v.comparison],['面板与坐标单位',[content(v.panels),content(v.axes_units)].filter(Boolean).join('；')],['统计单位',v.statistical_unit],['误差条',v.error_bars],['效应大小',v.effect_size],['不确定性',v.uncertainty],['正文与图注一致性',v.consistency],['公式用途',v.purpose],['符号与单位',v.symbols],['被测量',v.measurand],['适用条件',v.applicability],['解释边界',v.limitations]]);
+    let formula='';
+    if(hasReportContent(v.latex)){
+      const latex=String(v.latex).slice(0,4000);formula=`<p class="verified-equation">\\[${esc(latex)}\\]</p>`;
+      if(typeof mathRenderer==='function')try{formula=mathRenderer(latex,{displayMode:true,throwOnError:false,trust:false});}catch{/* Original page and source TeX remain available. */}
+    }
+    return `<div class="verified-visual" data-visual-record="${esc(v.inspection_id)}"><h3>${esc(v.label||v.locator)}</h3><p class="visual-stamp">${v.inspection_method==='vision_model'?'视觉模型核验 · 未经人工复核':'保存的实际图像查看记录'} · ${esc(v.inspected_at.slice(0,10))}</p><figure><img ${image} alt="${esc(v.label||v.locator)} · 论文原页第 ${page} 页"><figcaption>原论文 PDF 第 ${page} 页 · ${esc(v.locator||v.label)} · ${mode==='asset'?'点击放大':'保留原页供对照'}${url?` · <a href="${esc(url)}" target="_blank" rel="noopener noreferrer">原文来源 ↗</a>`:''}</figcaption></figure><p class="visual-explanation">${esc(v.explanation)}</p>${formula}${details}<details><summary>来源与查看记录</summary><p>PDF SHA256：${esc(v.source_sha256)}<br>原页图像 SHA256：${esc(v.image_sha256)}<br>查看记录：${esc(v.inspection_id)}</p></details></div>`;
+  }).join('');
+}
 const links=value=>rows(value).map(url=>{try{const u=new URL(url);return /^https?:$/.test(u.protocol)&&!u.username&&!u.password?`<li><a href="${esc(u.href)}" target="_blank" rel="noopener noreferrer">${esc(url)}</a></li>`:'';}catch{return '';}}).join('');
 export const STUDY_LABELS={experiment:'实验研究',experimental:'实验研究',method:'方法研究',theory:'理论研究',review:'综述研究',dataset:'数据集与基准',system:'系统研究',mixed:'混合研究',unknown:'类型未核验'};
 const DESIGN_LABELS={variables:'变量',samples:'样本',experimental_unit:'独立实验单位',independent_unit:'独立实验单位',equipment:'设备',parameters:'参数',controls:'对照',randomization:'随机化',blinding:'盲法',replication:'重复层级',repeats:'重复层级',exclusion_rules:'排除规则',statistics:'统计方法',inputs_outputs:'输入与输出',inputs:'输入',outputs:'输出',baseline_fairness:'基线公平性',data_splits:'训练与测试划分',train_test_split:'训练与测试划分',leakage:'数据泄漏',data_leakage:'数据泄漏',ablations:'消融',external_validation:'外部验证',assumptions:'假设',definitions:'定义',derivation:'推导',propositions:'关键命题',applicability:'适用条件',counterexamples:'反例',search_scope:'检索范围',selection:'筛选方法',selection_method:'筛选方法',evidence_classes:'证据分类',bias:'偏倚',heterogeneity:'异质性'};
 const ORIGIN_LABELS={paper_fact:'作者报告的结果',author_interpretation:'作者解释',analyst_inference:'分析者判断或推断',hypothesis:'尚待验证的假设',author:'作者说明（需来源定位）',analyst:'分析者重建',unknown:'来源尚未核验'};
 Object.assign(DESIGN_LABELS,{study_type:'研究类型',repetition_levels:'重复层级',baselines_fairness:'基线公平性',ablation:'消融',derivations:'推导',key_propositions:'关键命题',evidence_classification:'证据分类',review_type:'综述类型'});
 
-export function reportSections(paper,{flowHtml='',visualHtml='',coverageHtml='',currentScope=null}={}){
-  const a=object(paper.analysis),r=object(a.research_logic),scope=object(r.reading_scope),story=object(r.storyline),design=object(r.study_design),layers=object(r.conclusion_layers),transfer=transferValues(a);
+export function reportSections(paper,{flowHtml='',visualMode='asset',mathRenderer=globalThis.temml?.renderToString,coverageHtml='',currentScope=null}={}){
+  const a=object(paper.analysis),r=object(a.research_logic),scope=object(r.reading_scope),story=object(r.storyline),design=object(r.study_design),layers=object(r.conclusion_layers),transfer=transferValues(a),sourcePrefix=paper.id?String(paper.id)+':':'';
   const type=design.type||r.paper_type||'unknown',sections=[],add=(id,title,html)=>{if(html)sections.push([id,title,html]);};
   const gaps=[...new Set([...present(a.verification_gaps),...present(a.unread)])];
   const verification=a.verification_status||paper.verification_status||(a.verified===true?'已记录完成核验（以实际核验记录为准）':'尚无已完成全部核验的记录');
@@ -71,25 +109,20 @@ export function reportSections(paper,{flowHtml='',visualHtml='',coverageHtml='',
     sections[0][2]+=(changed?p('当前课题条件已改变。本报告仍沿用生成时的配置，旧建议需要重新核对适用性。'):'')+`<details><summary>本报告生成时的课题条件</summary>${contextHtml}</details>`;
   }
   add('summary','2. 论文总结',p(a.summary));
-  add('storyline','3. 科学问题与研究主线',dl([['作者明确问题',story.author_question],['分析者重建问题',story.reconstructed_question||a.scientific_question],['已有方法缺口',story.gap],['核心假设',story.hypothesis],['推理链',story.reasoning||story.reasoning_chain]]));
-  const flow=flowHtml||list(a.flow_steps);
+  add('storyline','3. 科学问题与研究主线',storylineMap(a,hasReportContent)+dl([['作者明确问题',story.author_question],['分析者重建问题',story.reconstructed_question||a.scientific_question],['已有方法缺口',story.gap],['核心假设',story.hypothesis],['推理链',story.reasoning||story.reasoning_chain]]));
+  const flow=flowHtml||(hasReportContent(a.flow_steps)?`<div class="flow">${researchFlowSvg(present(a.flow_steps),a.source_basis)}</div>`:'');
   add('flow','4. 研究流程示意',flow?p('分析者绘制，非论文原图；仅重建作者已报告工作。')+flow:'');
   const fields=object(design.fields),legacy=['variables','samples','equipment','parameters','controls','repeats','statistics'];
   const designRows=Object.keys(fields).length?Object.entries(fields).map(([key,value])=>[DESIGN_LABELS[key]||key,value]):legacy.map(key=>[DESIGN_LABELS[key],a[key]]),designHtml=dl(designRows);
-  add('design','5. 重建研究设计',designHtml?(type!=='unknown'?`<p class="reader-meta">${esc(STUDY_LABELS[type]||type)}</p>`:'')+designHtml+(type==='review'?p('综述的证据分类与作者综合，不构成新增实验；未实施荟萃分析时不得称为荟萃分析。'):''):'');
+  add('design','5. 重建研究设计',designHtml?(type!=='unknown'?`<p class="reader-meta">${esc(STUDY_LABELS[type]||type)}</p>`:'')+designMap(a,hasReportContent)+`<details><summary>逐项研究设计</summary>${designHtml}</details>`+(type==='review'?p('综述的证据分类与作者综合，不构成新增实验；未实施荟萃分析时不得称为荟萃分析。'):''):'');
   add('decisions','6. 关键设计决策',rows(r.design_decisions).map((row,i)=>{
     const d=object(row),details=dl([['设计选择',d.decision||d.choice],['解决的问题',d.problem],['选择理由',d.rationale],['代价',d.cost||d.tradeoff],['合理替代方案',d.alternative],['可能影响',d.possible_effect]]);
     if(!details)return '';
     return `<h3>${esc(d.id||'D'+String(i+1).padStart(2,'0'))}${hasReportContent(d.decision||d.choice)?' · '+esc(content(d.decision||d.choice)):''}</h3>`+details+(d.rationale_origin||d.origin?p('理由来源：'+(ORIGIN_LABELS[d.rationale_origin||d.origin]||'来源尚未核验')):'')+source(d.source_block_ids);
   }).join(''));
-  add('visuals','7. 原图、表格与公式核验',visualHtml+rows(r.evidence_review).map(row=>{
-    const e=object(row),details=dl([['证据用途',e.purpose],['比较对象',e.comparison],['面板',e.panels],['坐标与单位',e.axes_units],['统计单位',e.statistical_unit],['误差条',e.error_bars],['效应大小',e.effect_size],['不确定性',e.effect_uncertainty||e.uncertainty],['正文、图注与公式一致性',e.consistency],['公式符号',e.symbols],['被测量',e.measurand],['适用条件',e.applicability||e.conditions],['未核验与局限',e.limitations||e.gaps]]),claim=p(e.claim);
-    // A placeholder locator or status alone does not constitute figure analysis.
-    if(!details&&!claim)return '';
-    return `<h3>${esc(content(e.label||e.locator)||'关键证据')}</h3>`+claim+(e.verification_status?p('此项核验记录：'+(({unverified:'尚未核验',verified:'已核验（以实际核验记录为准）'})[e.verification_status]||e.verification_status)):'')+details+source(e.source_block_ids);
-  }).join(''));
+  add('visuals','7. 原图、表格与公式核验',originalsHtml(a,{mode:visualMode,mathRenderer}));
   const pitfalls=rows(r.pitfalls).map(row=>{const x=object(row),assessment=p(x.assessment||x.finding);return assessment?`<details><summary>${esc(content(x.kind||x.issue)||'证据边界')}</summary>${assessment}${source(x.source_block_ids)}</details>`:'';}).join('');
-  add('evidence','8. 结论、证据与局限',dl([['作者报告的结果',layers.author_results||a.author_results],['作者解释',layers.author_interpretation||a.author_conclusions],['分析者判断或推断',layers.analyst_inference||a.analyst_inference],['尚待验证的假设',layers.unverified_hypotheses||layers.hypotheses]])+rows(a.evidence).map(row=>{
+  add('evidence','8. 结论、证据与局限',evidenceActionMap(a,sourcePrefix)+dl([['作者报告的结果',layers.author_results||a.author_results],['作者解释',layers.author_interpretation||a.author_conclusions],['分析者判断或推断',layers.analyst_inference||a.analyst_inference],['尚待验证的假设',layers.unverified_hypotheses||layers.hypotheses]])+rows(a.evidence).map(row=>{
     const e=object(row),body=p(e.observation)+p(e.interpretation)+(hasReportContent(e.limits)?p('局限：'+content(e.limits)):'');
     if(!body&&!hasReportContent(e.claim))return '';
     return `<div class="evidence-block"><h3>${esc([content(e.id),content(e.claim)].filter(Boolean).join(' · ')||'证据记录')}</h3>`+(e.origin?p('信息性质：'+(ORIGIN_LABELS[e.origin]||'来源尚未核验')):'')+body+source(e.source_block_ids)+'</div>';
@@ -109,7 +142,8 @@ export function reportSections(paper,{flowHtml='',visualHtml='',coverageHtml='',
   }).join(''),roadmap=p(a.roadmap||a.action_status);
   add('actions','11. 下一步研究规划与行动卡',actionCards||roadmap?p('以下均为待执行方案。样本量、阈值与允许误差须依据原文或先导实验确定。')+actionCards+roadmap:'');
   const sourceLinks=links(a.sources);
-  add('sources','来源与核验边界',(sourceLinks?`<ul>${sourceLinks}</ul>`:'')+list(gaps));
+  const blocks=rows(a.source_blocks).filter(block=>hasReportContent(block.id)&&hasReportContent(block.text));
+  add('sources','来源与核验边界',(sourceLinks?`<ul>${sourceLinks}</ul>`:'')+list(gaps)+blocks.map(block=>`<details id="source-${esc(encodeURIComponent(sourcePrefix+String(block.id)))}"><summary>${esc(block.id)}${hasReportContent(block.locator)?' · '+esc(block.locator):''}</summary><p>${esc(block.text)}</p></details>`).join(''));
   return sections;
 }
 

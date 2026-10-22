@@ -31,6 +31,7 @@ from .provider import Provider
 from .skill import Skill
 from .artifacts import inspect_pdf, challenge_image, export_zip, flow_svg
 from .exporting import clean_export
+from .visual_review import checked_visual_records, project_visual_evidence
 
 
 @asynccontextmanager
@@ -614,10 +615,7 @@ def read_candidate_json(root, name, default=None):
 
 
 def reviewed_visuals(root):
-    visual = read_candidate_json(root, 'visual-checkpoints.json', {})
-    if not isinstance(visual, dict):
-        return []
-    return sorted((int(page), record) for page, record in visual.items() if str(page).isdigit() and 1 <= int(page) <= 300 and isinstance(record, dict) and record.get('readable') is True and not record.get('unread'))
+    return checked_visual_records(root)
 
 
 def candidate_analysis(root, candidate):
@@ -630,6 +628,7 @@ def candidate_analysis(root, candidate):
             break
     if analysis is None:
         return None
+    analysis = project_visual_evidence(analysis, root, candidate.get('url', ''))
     analysis.pop('artifact_dir', None)
     if candidate.get('status') != 'completed':
         # A saved analysis file can precede structural validation and ledger registration.
@@ -640,11 +639,6 @@ def candidate_analysis(root, candidate):
         if candidate.get('reason') and candidate['reason'] not in gaps:
             gaps.append(candidate['reason'])
         analysis['verification_gaps'] = gaps or ['精读、图表或结构校验尚未全部通过']
-        # Legacy drafts were saved before any visual review. Recover only observations
-        # that the worker actually persisted; acquired image files alone prove nothing.
-        visual = reviewed_visuals(root)
-        if visual:
-            analysis['visuals'] = [dict(item, page=page) for page, record in visual if isinstance(record.get('items'), list) for item in record['items'] if isinstance(item, dict)]
     return analysis
 
 
@@ -784,7 +778,16 @@ def papers_for(pid=None):
             result = [(s.get(Paper, x.paper_number), json.loads(x.analysis_json), x.job_id) for x in links]
         else:
             result = [(p, json.loads(p.analysis_json), None) for p in s.scalars(select(Paper).order_by(Paper.number)).all()]
-        return [dict(json.loads(p.metadata_json), id=f'R{p.number:03d}', analysis=a, batch_id=jid, created_at=p.created_at) for p, a, jid in result]
+        papers = []
+        for p, a, jid in result:
+            meta = json.loads(p.metadata_json)
+            relative = a.get('artifact_dir')
+            folder = DATA / relative if isinstance(relative, str) and relative else None
+            if folder is not None and (folder.resolve() != folder or not folder.is_relative_to(DATA.resolve())):
+                folder = None
+            projected = project_visual_evidence(a, folder, meta.get('url', ''))
+            papers.append(dict(meta, id=f'R{p.number:03d}', analysis=projected, batch_id=jid, created_at=p.created_at))
+        return papers
 
 
 @app.get('/api/projects/{pid}/papers', dependencies=[Depends(auth)])

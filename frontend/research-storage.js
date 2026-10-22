@@ -1,6 +1,6 @@
 // User-authorized directory storage. A verified manifest is the commit point.
 // Never reads outside the selected handle or recursively clears a user folder.
-import {recordMarkdown,recordEvidence,researchFlowSvg,exportOfflineHtml} from './research-export.js?v=20261022-reference';
+import {recordMarkdown,recordEvidence,researchFlowSvg,exportOfflineHtml} from './research-export.js?v=20261022-visuals1';
 const HEAD='paper-workbench.json',MAGIC='paper-workbench-directory-v1';
 const copy=value=>value==null?null:JSON.parse(JSON.stringify(value));
 const safe=value=>{const name=String(value);if(!/^[A-Za-z0-9_.-]{1,160}$/.test(name)||name==='.'||name==='..')throw new Error('研究库文件名无效，未写入目录。');return name;};
@@ -40,7 +40,7 @@ export function createDirectoryWorkspaceStore({fallbackStore,showDirectoryPicker
       const base=locations[pid]||`${date}/${pid}`;if(!/^(?:\d{4}-\d{2}-\d{2}|undated)\/[A-Za-z0-9_-]+$/.test(base))throw new Error('论文位置清单无效，未写入。');locations[pid]=base;
       files[base+'/reading-note.md']=recordMarkdown(paper);files[base+'/evidence.json']=JSON.stringify(recordEvidence(paper),null,2);
       files[base+'/assets/research-flow.svg']=researchFlowSvg(paper.analysis?.flow_steps||[],paper.analysis?.source_basis||'abstract');
-      files[base+'/source/source_map.json']=JSON.stringify({paper_id:paper.id,source_metadata:paper.analysis?.source_metadata||{},blocks:paper.analysis?.source_blocks||[],coverage:paper.analysis?.coverage||{},pdf_saved:false,notice:'此适配器保留实际提取文字和来源指纹，原始 PDF 与原图未持久保存；不得据此假称已取得原图。'},null,2);
+      files[base+'/source/source_map.json']=JSON.stringify({paper_id:paper.id,source_metadata:paper.analysis?.source_metadata||{},blocks:paper.analysis?.source_blocks||[],coverage:paper.analysis?.coverage||{},pdf_saved:false,notice:'此适配器保留实际提取文字和来源指纹，未保存原始 PDF；原页图像是否保存及核验范围以 evidence.json 中的 visuals 记录为准，已保存的原页同时嵌入课题离线网页。'},null,2);
     }
     const entries=[];for(const project of workspace.projects||[]){const pid=safe(project.id),path=`projects/${pid}/index.html`;files[path]=exportOfflineHtml(projectBundle(workspace,project));entries.push(`<li><a href="./${path}">${escape(project.name)}</a></li>`);}
     files['index.html']=`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'"><title>研究主目录</title><h1>研究主目录</h1><p>选择课题查看报告、跨论文综合与待执行行动。核验边界以保存记录为准。</p><ul>${entries.join('')}</ul></html>`;

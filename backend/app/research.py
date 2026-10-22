@@ -13,6 +13,8 @@ study_design.type 按论文类型选 experimental/method/theory/review/dataset/s
 方法检查输入输出、基线公平性、训练测试划分、泄漏、消融、外部验证；理论检查假设定义推导命题条件反例；
 综述检查检索范围筛选分类偏倚异质性，不当作新增实验或荟萃分析。design_decisions 记录选择、代价、替代与理由来源。
 evidence_review 选决定核心结论的图表公式，记录比较、面板/坐标单位、统计单位、效应/不确定性、正文图注公式一致性。
+该数组在文本阶段只是待核对的审计草稿，不是已经完成的图表核验报告；未实际查看原图的条目不进入第7节正文。
+实际视觉请求须给出原文图表/公式编号、PDF页码、可见观察与具体解释；无法确认编号或观察时省略该项，不能用通用方法知识填补。
 图表按实际来源补充 panels、error_bars、effect_size；公式解释 purpose、symbols、measurand、applicability，不只抄公式。
 图像请求之前 verification_status 只能 unverified；阅读范围不得声称图像已目视核验。
 conclusion_layers 分开作者结果、作者解释、分析者推断、未验证假设。
@@ -62,8 +64,8 @@ def stamp_reading_scope(analysis, checked_pages, completed=False):
         'verified': ['主文来源块已处理'] + ([f'视觉模型已查看原始 PDF 第 {p} 页（未经独立人工复核）' for p in checked_pages]),
         'unverified': list(dict.fromkeys([*analysis.get('unread', []), '补充材料与代码仅在另有明确获取记录时覆盖', '结构校验不证明科学结论成立'] + ([] if completed else ['精读与结构校验尚未全部完成'])))
     }
-    # Per-item labels stay unverified unless the original visual record itself
-    # provides a verified locator. Page-level checking is exposed separately.
+    # Item-level receipts are stamped separately from persisted, fingerprinted
+    # image requests; checking a page never certifies all text-derived claims.
 
 
 def synthesis_records(rows):

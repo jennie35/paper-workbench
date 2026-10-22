@@ -319,6 +319,21 @@ def reference_value(evidence, note):
 
 def available_note(text):
     """Omit standalone empty template rows; preserve substantive limitations."""
+    # Original figure reviews are rebuilt from individually checked image records.
+    # A prose heading or a model's assertion cannot establish that an image was seen.
+    retained = []
+    review_depth = None
+    for line in text.splitlines():
+        heading = re.match(r"^(#{1,6})\s+(.+)", line)
+        if heading:
+            depth, title = len(heading.group(1)), heading.group(2)
+            if review_depth is not None and depth <= review_depth:
+                review_depth = None
+            if re.search(r"(?:原图|图表|表格|公式).*(?:核验|检查)|(?:figure|table|equation).*(?:verification|inspection)", title, re.I):
+                review_depth = depth
+        if review_depth is None:
+            retained.append(line)
+    text = "\n".join(retained)
     sections = re.split(r"(?m)(?=^#{1,6}\s)", text)
     shown = []
     for section in sections:
@@ -335,6 +350,171 @@ def available_note(text):
     return "\n\n".join(shown)
 
 
+def verified_visuals(root, base, evidence):
+    """Project saved inspection receipts, checking file identity but not scientific truth."""
+    sources = evidence.get("sources", [])
+    sources = sources if isinstance(sources, list) else []
+    result, seen = [], set()
+    for collection in ("original_images", "visuals"):
+        records = evidence.get(collection, [])
+        if not isinstance(records, list):
+            continue
+        for item in records:
+            if not isinstance(item, dict):
+                continue
+            if item.get("inspection_status") != "verified" or item.get("inspection_method") not in ("manual", "visual_tool", "vision_model"):
+                continue
+            receipt = item.get("inspection_id")
+            checked_at = item.get("inspected_at")
+            if not isinstance(receipt, str) or not display_text(receipt) or not isinstance(checked_at, str):
+                continue
+            try:
+                stamp = dt.datetime.fromisoformat(checked_at.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if stamp.tzinfo is None:
+                continue
+            page = item.get("page", item.get("source_page"))
+            if isinstance(page, bool) or not isinstance(page, int) or page < 1:
+                continue
+            kind = item.get("type") or item.get("kind")
+            locator = display_text(item.get("locator") or item.get("figure_number") or item.get("figure_id") or item.get("label"))
+            explanation = display_text(item.get("explanation") or item.get("interpretation") or item.get("analysis"))
+            image_path = item.get("asset_path") or item.get("path")
+            image_hash, source_hash = item.get("image_sha256"), item.get("source_sha256")
+            if kind not in ("figure", "table", "equation") or not re.search(r"\d|[一二三四五六七八九十]", locator) or not explanation or not isinstance(image_path, str) or not all(isinstance(value, str) and re.fullmatch(r"[a-fA-F0-9]{64}", value) for value in (image_hash, source_hash)):
+                continue
+            try:
+                image = within(root, base + "/" + image_path, must_exist=False)
+            except WorkspaceError:
+                continue
+            if not image.is_file():
+                continue
+            image_bytes = image.read_bytes()
+            signatures = {".png": image_bytes.startswith(b"\x89PNG\r\n\x1a\n"),
+                          ".jpg": image_bytes.startswith(b"\xff\xd8") and image_bytes.endswith(b"\xff\xd9"),
+                          ".jpeg": image_bytes.startswith(b"\xff\xd8") and image_bytes.endswith(b"\xff\xd9"),
+                          ".gif": image_bytes[:6] in {b"GIF87a", b"GIF89a"},
+                          ".webp": image_bytes.startswith(b"RIFF") and image_bytes[8:12] == b"WEBP"}
+            if not signatures.get(image.suffix.lower()) or digest(image_bytes) != image_hash.lower():
+                continue
+            candidates = [item.get("source_path")]
+            candidates.extend(source.get("path") for source in sources if isinstance(source, dict) and (str(source.get("sha256", "")).lower() == source_hash.lower() or item.get("source_id") and source.get("source_id") == item.get("source_id")))
+            source = None
+            for path in candidates:
+                if not isinstance(path, str) or not path:
+                    continue
+                try:
+                    file = within(root, base + "/" + path, must_exist=False)
+                except WorkspaceError:
+                    continue
+                if file.is_file() and digest(file.read_bytes()) == source_hash.lower():
+                    source = path
+                    break
+            if source is None or (image_path, locator) in seen:
+                continue
+            seen.add((image_path, locator))
+            result.append({**item, "path": image_path, "source_path": source, "page": page, "locator": locator,
+                           "explanation": explanation, "inspection_id": receipt, "kind": kind})
+    return result
+
+
+def render_visuals(base, records):
+    figures = []
+    for item in records:
+        path = href(base + "/" + item["path"])
+        source = href(base + "/" + item["source_path"])
+        if item["source_path"].lower().endswith(".pdf"):
+            source += f'#page={item["page"]}'
+        caption = display_text(item.get("caption")) or item["locator"]
+        detail = "".join(f'<p><b>{esc(label)}</b> {esc(value)}</p>' for label, value in (
+            ("比较与测量", display_text(item.get("comparison") or item.get("measurement"))),
+            ("坐标与单位", display_text(item.get("axes_units"))),
+            ("统计单位", display_text(item.get("statistical_unit"))),
+            ("误差与不确定性", display_text(item.get("uncertainty") or item.get("error_bars"))),
+            ("正文与图像一致性", display_text(item.get("consistency"))),
+            ("符号与条件", display_text(item.get("symbols") or item.get("conditions"))),
+            ("证据边界", display_text(item.get("limitations"))),
+        ) if value)
+        formula = display_text(item.get("formula_latex") or item.get("formula"))
+        formula_html = f'<pre class="formula-source">{esc(formula)}</pre>' if formula else ""
+        review_label = {"vision_model": "模型目视分析，未经人工复核", "visual_tool": "图像工具查看记录", "manual": "人工查看记录"}[item["inspection_method"]]
+        figures.append(f'<figure class="verified-visual"><figcaption><b>{esc(item["locator"])}</b><span>原文第 {item["page"]} 页 · {review_label}</span></figcaption><a href="{path}" aria-label="放大来源图像：{esc(caption)}"><img loading="lazy" src="{path}" alt="{esc(caption)}"></a><p class="visual-explanation">{esc(item["explanation"])}</p>{formula_html}{detail}<p class="visual-source"><a href="{source}">查看原始来源</a> · {esc(item["inspected_at"])} · 查看记录 {esc(item["inspection_id"])}</p></figure>')
+    return '<section class="visual-reviews"><h3>精选原图、表格与公式核验</h3>' + "".join(figures) + '</section>' if figures else ""
+
+
+def render_research_map(evidence):
+    """Visualize saved steps and explicit E/C/A relationships; never infer edges."""
+    logic = evidence.get("research_logic")
+    logic = logic if isinstance(logic, dict) else {}
+    steps = evidence.get("flow_steps", logic.get("flow_steps", []))
+    steps = steps if isinstance(steps, list) else []
+    steps = [display_text(step.get("label") or step.get("text") or step.get("title")) if isinstance(step, dict) else display_text(step) for step in steps]
+    steps = [step for step in steps if step]
+    flow = '<ol class="research-flow">' + ''.join(f'<li>{esc(step)}</li>' for step in steps) + '</ol>' if len(steps) > 1 else ""
+    records = evidence.get("evidence", logic.get("evidence", []))
+    records = records if isinstance(records, list) else []
+    records = {str(item["id"]): item for item in records if isinstance(item, dict) and item.get("id")
+               and item.get("verification_status") not in (False, "unverified", "pending", "未核验", "尚未核验")
+               and item.get("inspection_status") not in (False, "unverified", "pending", "未核验", "尚未核验")
+               and (item.get("kind") or item.get("type")) not in ("figure", "table", "equation", "image")}
+    claims = evidence.get("claims", logic.get("claims", []))
+    claims = claims if isinstance(claims, list) else []
+    rows, linked = [], set()
+    for claim in claims:
+        if not isinstance(claim, dict) or not claim.get("id"):
+            continue
+        claim_id = str(claim["id"])
+        statement = display_text(claim.get("text") or claim.get("claim") or claim.get("statement"))
+        ids = claim.get("evidence_ids", [])
+        ids = ids if isinstance(ids, list) else []
+        for evidence_id in ids:
+            record = records.get(str(evidence_id))
+            if not record or not statement:
+                continue
+            location = display_text(record.get("locator") or record.get("source_id"))
+            description = display_text(record.get("text") or record.get("observation") or record.get("claim"))
+            if not location or not description:
+                continue
+            for action in actions_from(evidence):
+                if not isinstance(action, dict):
+                    continue
+                claim_ids, evidence_ids = action.get("claim_ids", []), action.get("evidence_ids", [])
+                if not (isinstance(claim_ids, list) and claim_id in map(str, claim_ids) or isinstance(evidence_ids, list) and str(evidence_id) in map(str, evidence_ids)):
+                    continue
+                plan = display_text(action.get("title") or action.get("question"))
+                if not plan:
+                    continue
+                linked.add((str(evidence_id), str(action.get("id", ""))))
+                rows.append('<li>' + ''.join(f'<div><small>{esc(label)}</small><p>{esc(value)}</p></div>' for label, value in (
+                    (str(evidence_id) + " · 来源记录", description + "（" + location + "）"),
+                    (claim_id + " · 保存的判断", statement),
+                    (str(action.get("id", "")) + " · 待执行", plan))) + '</li>')
+    # An action may explicitly cite an E ID without an intermediate C ID.
+    for action in actions_from(evidence):
+        if not isinstance(action, dict) or not isinstance(action.get("evidence_ids"), list):
+            continue
+        plan = display_text(action.get("title") or action.get("question"))
+        if not plan:
+            continue
+        for evidence_id in action["evidence_ids"]:
+            record = records.get(str(evidence_id))
+            if not record or (str(evidence_id), str(action.get("id", ""))) in linked:
+                continue
+            location = display_text(record.get("locator") or record.get("source_id"))
+            description = display_text(record.get("text") or record.get("observation") or record.get("claim"))
+            if not location or not description:
+                continue
+            linked.add((str(evidence_id), str(action.get("id", ""))))
+            rows.append('<li class="direct-link">' + ''.join(f'<div><small>{esc(label)}</small><p>{esc(value)}</p></div>' for label, value in (
+                (str(evidence_id) + " · 来源记录", description + "（" + location + "）"),
+                (str(action.get("id", "")) + " · 待执行", plan))) + '</li>')
+    connections = '<ol class="evidence-path">' + ''.join(rows) + '</ol>' if rows else ""
+    if not flow and not connections:
+        return ""
+    return '<section class="research-map"><h3>研究脉络定位</h3><p class="analyst-label">分析者绘制，非论文原图；仅呈现保存的步骤与显式关联。</p>' + flow + connections + '</section>'
+
+
 def validate_evidence(root, base, evidence):
     if not isinstance(evidence, dict):
         raise WorkspaceError("evidence.json must be a JSON object; its contents are not executed")
@@ -342,9 +522,9 @@ def validate_evidence(root, base, evidence):
     if not isinstance(images, list):
         raise WorkspaceError("original_images must be an array when provided")
     for image in images:
-        if not isinstance(image, dict) or not isinstance(image.get("path"), str):
+        if not isinstance(image, dict) or not isinstance(image.get("asset_path") or image.get("path"), str):
             raise WorkspaceError("Each original_images entry needs a local relative path")
-        target = within(root, base + "/" + image["path"])
+        target = within(root, base + "/" + (image.get("asset_path") or image["path"]))
         if not target.is_file():
             raise WorkspaceError("Original image path is not a file")
     return evidence
@@ -431,6 +611,12 @@ article{position:relative;display:grid;grid-template-columns:128px minmax(0,1fr)
 """
 
 
+DASHBOARD_CSS += """
+.research-map{border:1px solid var(--line);padding:22px;margin:25px 0}.research-map h3{margin:0 0 10px}.analyst-label{font-size:10px;color:var(--muted);margin-bottom:18px}.research-flow,.evidence-path{list-style:none;padding:0;margin:0}.research-flow{counter-reset:step;display:flex;flex-wrap:wrap;gap:12px}.research-flow>li{counter-increment:step;flex:1 1 125px;position:relative;padding:14px;border:1px solid var(--line);background:#eeefed;font-size:12px}.research-flow>li:before{content:counter(step,decimal-leading-zero);display:block;color:var(--accent);font:19px var(--serif);margin-bottom:5px}.research-flow>li+li:after{content:'→';position:absolute;left:-12px;top:40%;color:var(--accent)}.evidence-path{margin-top:20px}.evidence-path>li{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;padding-top:16px;border-top:1px solid var(--line);margin-top:16px}.evidence-path>li.direct-link{grid-template-columns:repeat(2,minmax(0,1fr))}.evidence-path>li>div{min-width:0;position:relative;padding:13px;background:#eeefed;overflow-wrap:anywhere}.evidence-path>li>div+div:before{content:'→';position:absolute;left:-17px;top:40%;color:var(--accent)}.evidence-path small{font-size:9px;color:var(--accent)}.evidence-path p{font-size:11px;line-height:1.8;margin:7px 0 0}.verified-visual{padding:22px 0;border-top:1px solid var(--line)}.verified-visual figcaption{display:flex;justify-content:space-between;gap:16px;margin-bottom:16px}.verified-visual figcaption b{font-size:15px;color:var(--ink)}.verified-visual img{display:block;max-height:750px;margin:auto;border:1px solid var(--line)}.verified-visual p{font-size:12px;margin:14px 0 0}.visual-explanation{border-left:2px solid var(--accent);padding-left:14px}.verified-visual .visual-source{font-size:10px;color:var(--muted);overflow-wrap:anywhere}.formula-source{padding:14px;background:#eeefed;font-family:monospace}
+@media(max-width:600px){.research-map{padding:16px}.research-flow{display:block}.research-flow>li{margin-top:20px}.research-flow>li+li:after{content:'↓';left:50%;top:-24px}.evidence-path>li,.evidence-path>li.direct-link{grid-template-columns:1fr;gap:22px}.evidence-path>li>div+div:before{content:'↓';left:50%;top:-24px}.verified-visual figcaption{display:block}.verified-visual figcaption span{display:block;margin-top:5px}}
+"""
+
+
 def render(root, config, ledger):
     articles = []
     dialogs = []
@@ -458,13 +644,7 @@ def render(root, config, ledger):
         if not external and norm_doi(meta.get("doi")):
             external = "https://doi.org/" + norm_doi(meta["doi"])
         source = f'<a href="{esc(external)}" rel="noreferrer">原文 ↗</a>' if external else ""
-        original = []
-        for image in evidence.get("original_images", []):
-            if not isinstance(image, dict) or not image.get("path"):
-                continue
-            image_path = base + "/" + str(image["path"])
-            within(root, image_path)
-            original.append(f'<figure><a href="{href(image_path)}"><img loading="lazy" src="{href(image_path)}" alt="{esc(image.get("caption", "来源图像"))}"></a><figcaption>{esc(image.get("caption", ""))} · {esc(image.get("verification_status", "未核验"))}（按保存记录显示；图片存在不代表已目视核验）</figcaption></figure>')
+        original = verified_visuals(root, base, evidence)
         logic = evidence.get("research_logic")
         reading = evidence.get("reading_priorities", (logic if isinstance(logic, dict) else {}).get("reading_priorities", []))
         reading = [display_text(item) for item in reading if available(item)] if isinstance(reading, list) else []
@@ -493,13 +673,14 @@ def render(root, config, ledger):
         theme_html = f'<div class="record-theme">{esc(themes)}</div>' if themes else ""
         articles.append(f'''<article data-search="{esc(search.casefold())}" data-date="{esc(date)}" data-theme="{esc(themes.casefold())}" data-priority="{esc(' '.join(priorities))}" data-selected="{'yes' if selected else 'no'}">
 <div class="record-index"><span class="badge">{esc(record['id'])}</span><span class="record-status" title="保存的阅读状态：{esc(meta['reading_status'])}">{status_label}</span></div><div class="record-body"><header>{theme_html}<h2><button class="record-open" data-open="{dialog_id}" aria-haspopup="dialog" aria-controls="{dialog_id}">{esc(meta['title'])}</button></h2>{f'<p>{esc(citation)}</p>' if citation else ''}</header>{summary_html}{relevance_html}{selected_preview}{action_preview}<div class="card-footer"><span class="record-date">{esc(date)}</span><button class="card-detail" data-open="{dialog_id}" aria-haspopup="dialog" aria-controls="{dialog_id}">查看详细分析 ↗</button></div></div></article>''')
-        original_html = '<section><h3>保存的原图与核验记录</h3>' + "".join(original) + '</section>' if original else ""
+        original_html = render_visuals(base, original)
+        research_map = render_research_map(evidence)
         selected_html = f'<section class="selected"><h3>需要重点精读的证据</h3><ul>{selected}</ul></section>' if selected else ""
         actions_html = f'<section class="actions"><h3>下一步研究 · 待执行</h3><ul>{action_html}</ul></section>' if action_html else ""
         sources_html = f'<details><summary>来源与图像文件</summary><ul>{"".join(source_links)}</ul></details>' if source_links else ""
         note = available_note(text)
         report_html = f'<section><h3>研究分析</h3><pre>{esc(note)}</pre></section>' if note else ""
-        dialogs.append(f'''<dialog class="reader-dialog" id="{dialog_id}" aria-labelledby="title-{esc(record['id'])}"><div class="reader-toolbar"><span>{esc(record['id'])} · {status_label}</span><button data-close="{dialog_id}" autofocus>关闭 · 返回文献库 ×</button></div><div class="reader-content"><h2 id="title-{esc(record['id'])}">{esc(meta['title'])}</h2>{f'<p class="record-meta">{esc(citation)}</p>' if citation else ''}{summary_html}{relevance_html}<div class="files">{source}{reader_link}<a href="{href(base + '/reading-note.md')}">阅读笔记</a><a href="{href(base + '/evidence.json')}">证据 JSON</a><a href="{href(base + '/metadata.json')}">题录与阅读状态</a></div>{report_html}{original_html}{selected_html}{actions_html}{sources_html}</div></dialog>''')
+        dialogs.append(f'''<dialog class="reader-dialog" id="{dialog_id}" aria-labelledby="title-{esc(record['id'])}"><div class="reader-toolbar"><span>{esc(record['id'])} · {status_label}</span><button data-close="{dialog_id}" autofocus>关闭 · 返回文献库 ×</button></div><div class="reader-content"><h2 id="title-{esc(record['id'])}">{esc(meta['title'])}</h2>{f'<p class="record-meta">{esc(citation)}</p>' if citation else ''}{summary_html}{relevance_html}<div class="files">{source}{reader_link}<a href="{href(base + '/reading-note.md')}">阅读笔记</a><a href="{href(base + '/evidence.json')}">证据 JSON</a><a href="{href(base + '/metadata.json')}">题录与阅读状态</a></div>{research_map}{report_html}{original_html}{selected_html}{actions_html}{sources_html}</div></dialog>''')
     complete = sum(item["metadata"]["reading_status"] == "complete" for item in ledger["records"])
     return f'''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data: file:; connect-src 'none'; base-uri 'none'; form-action 'none'"><title>{esc(config['project_name'])} · 文献研究</title><style>
 {DASHBOARD_CSS}

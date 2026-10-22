@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import {apiOrigin} from '../workflow.js';
-import {reportSections,hasReportContent,referenceValue} from '../research-view.js';
+import {reportSections,hasReportContent,referenceValue,verifiedOriginals} from '../research-view.js';
+import {diagramStyle} from '../research-diagrams.js';
 
 const code=readFileSync(new URL('../app.js',import.meta.url),'utf8');
 function extract(start,end){
@@ -51,7 +52,7 @@ test('direct settings opened from home stays in API settings and forwards contin
 
 function readerContext(){
   const state={mode:'direct',demo:false,view:'latest',papers:[],jobs:[]},display=[],assets=[];
-  const exportButton={addEventListener(){}},context=vm.createContext({state,esc,reportSections,hasReportContent,referenceValue,watermark:'Analysis performed using the norman-paper-reading skill | APPLIED-SIGNATURE',badge:label=>`<span>${esc(label)}</span>`,publicationLink:()=>'',tags:()=>[],showModal:(title,body)=>display.push({title,body}),renderMath(){},loadReaderAssets:async path=>assets.push(path),$:id=>id==='exportCandidate'?exportButton:null});
+  const exportButton={addEventListener(){}},context=vm.createContext({state,esc,reportSections,hasReportContent,referenceValue,verifiedOriginals,diagramStyle,watermark:'Analysis performed using the norman-paper-reading skill | APPLIED-SIGNATURE',badge:label=>`<span>${esc(label)}</span>`,publicationLink:()=>'',tags:()=>[],showModal:(title,body)=>display.push({title,body}),renderMath(){},loadReaderAssets:async path=>assets.push(path),$:id=>id==='exportCandidate'?exportButton:null});
   vm.runInContext(extract('function reportLabel(','function badge('),context);
   vm.runInContext(extract('function section(','function renderMath('),context);
   vm.runInContext(extract('async function showPaper(','async function showCandidate('),context);
@@ -111,9 +112,10 @@ test('closing direct settings before model-list results arrive cannot write into
 
 test('saving a direct connection remembers mode but never writes the supplied key into localStorage',async()=>{
   const setup=directConnectionContext();
+  setup.$('directVisionModel').value='fixture-vision-model';
   await setup.$('directConnectForm').onsubmit({preventDefault(){},submitter:setup.$('directConnectSubmit')});
   assert.equal(setup.state.mode,'direct');assert.equal(setup.state.base,'');assert.equal(setup.state.token,'');
-  assert.deepEqual(setup.writes,[['pw-mode','direct']]);assert.equal(setup.events[0][0],'configure');assert.equal(setup.events[0][1].api_key,'SYNTHETIC-DIRECT-KEY');assert.equal(setup.events[1],'load-workspace');
+  assert.deepEqual(setup.writes,[['pw-mode','direct']]);assert.equal(setup.events[0][0],'configure');assert.equal(setup.events[0][1].api_key,'SYNTHETIC-DIRECT-KEY');assert.equal(setup.events[0][1].vision_model,'fixture-vision-model');assert.equal(setup.events[1],'load-workspace');
 });
 
 test('disconnecting direct API clears its memory session while retaining the browser project list',async()=>{

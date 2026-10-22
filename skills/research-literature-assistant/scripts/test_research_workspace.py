@@ -1,5 +1,7 @@
 """Synthetic behavioral tests. No network, installed skills or private library required."""
 import importlib.util
+import base64
+from copy import deepcopy
 import json
 from pathlib import Path
 import tempfile
@@ -218,6 +220,103 @@ class WorkspaceTests(unittest.TestCase):
                 self.assertEqual(workspace.reference_text(default), '')
         substantive = '先取得全文再判断能否迁移；具体应核对分层采样方案能否分离样本差异与测量误差。'
         self.assertEqual(workspace.reference_text(substantive), substantive)
+
+    def inspected_visual(self, draft):
+        image = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aT9sAAAAASUVORK5CYII=')
+        (draft / 'assets' / 'page-1.png').write_bytes(image)
+        source = (draft / 'source' / 'abstract.txt').read_bytes()
+        return {'kind': 'figure', 'label': 'Figure 2', 'locator': 'Figure 2, panel A',
+                'page': 1, 'asset_path': 'assets/page-1.png', 'source_path': 'source/abstract.txt',
+                'image_sha256': workspace.digest(image), 'source_sha256': workspace.digest(source),
+                'inspection_status': 'verified', 'inspection_method': 'vision_model',
+                'inspection_id': 'synthetic-inspection-request-1', 'inspected_at': '2026-10-22T03:04:05Z',
+                'explanation': 'Synthetic fixture observation <script>bad()</script>, not a real scientific finding.',
+                'axes_units': 'Synthetic axis, seconds', 'limitations': 'One-pixel synthetic fixture only.'}
+
+    def test_uninspected_visual_prose_is_omitted_but_original_audit_files_are_preserved(self):
+        draft = self.draft()
+        note = ('## 2. Summary\nSaved textual finding.\n\n'
+                '## 7. 精选原图、表格与公式核验\n此项核验记录：尚未核验\n'
+                '### Figure 9\nUnsupported figure interpretation must not be shown.\n\n'
+                '## 8. Evidence boundaries\nThe saved text does not establish independent validation.\n')
+        (draft / 'reading-note.md').write_text(note, encoding='utf-8')
+        row = self.inspected_visual(draft)
+        row['inspection_status'] = 'unverified'
+        evidence_bytes = workspace.json_bytes({'original_images': [row]})
+        (draft / 'evidence.json').write_bytes(evidence_bytes)
+        result = workspace.register(self.root, draft)
+        page = (self.root / 'index.html').read_text('utf-8')
+        self.assertNotIn('Unsupported figure interpretation', page)
+        self.assertNotIn('此项核验记录', page)
+        self.assertNotIn('visual-reviews"><h3>', page)
+        self.assertIn('Saved textual finding.', page)
+        self.assertIn('The saved text does not establish independent validation.', page)
+        saved = Path(result['path'])
+        self.assertEqual((saved / 'reading-note.md').read_text('utf-8'), note)
+        self.assertEqual((saved / 'evidence.json').read_bytes(), evidence_bytes)
+        self.assertEqual(workspace.check(self.root)['complete_readings'], 0)
+
+    def test_inspection_receipt_uses_bound_source_image_and_explanation_not_a_verified_boolean(self):
+        draft = self.draft()
+        row = self.inspected_visual(draft)
+        source_path = row.pop('source_path')
+        evidence = {'visuals': [row], 'sources': [{'path': source_path, 'sha256': row['source_sha256']}]}
+        saved_bytes = workspace.json_bytes(evidence)
+        (draft / 'evidence.json').write_bytes(saved_bytes)
+        result = workspace.register(self.root, draft)
+        page = (self.root / 'index.html').read_text('utf-8')
+        base = Path(result['path']).relative_to(self.root).as_posix()
+        self.assertIn(f'src="{base}/assets/page-1.png"', page)
+        self.assertIn('Figure 2, panel A', page)
+        self.assertIn(f'href="{base}/source/abstract.txt"', page)
+        self.assertIn('模型目视分析，未经人工复核', page)
+        self.assertIn('synthetic-inspection-request-1', page)
+        self.assertIn('Synthetic axis, seconds', page)
+        self.assertNotIn('<script>bad()', page)
+        self.assertIn('&lt;script&gt;bad()', page)
+        self.assertEqual((Path(result['path']) / 'evidence.json').read_bytes(), saved_bytes)
+        self.assertEqual(workspace.check(self.root)['complete_readings'], 0)
+
+    def test_unsupported_or_tampered_visual_receipts_do_not_render(self):
+        draft = self.draft()
+        row = self.inspected_visual(draft)
+        base = draft.relative_to(self.root).as_posix()
+        invalid = [dict(row, inspection_status='unverified'), dict(row, inspection_method='text_model'),
+                   dict(row, inspection_id=''), dict(row, inspected_at='tomorrow'),
+                   dict(row, inspected_at='2026-10-22T03:04:05'), dict(row, page=True),
+                   dict(row, locator='Source image', label='Source image'), dict(row, explanation='未核验'),
+                   dict(row, kind='analyst_diagram'), dict(row, image_sha256='0'*64),
+                   dict(row, source_sha256='0'*64), dict(row, asset_path='../outside.png'),
+                   dict(row, source_path='../outside.txt'), dict(row, source_path='source/missing.txt'),
+                   dict(row, inspection_method=[]), dict(row, kind={}), dict(row, inspection_id=True)]
+        for value in invalid:
+            with self.subTest(value=value):
+                self.assertEqual(workspace.verified_visuals(self.root, base, {'visuals': [value], 'verified': True}), [])
+        self.assertEqual(len(workspace.verified_visuals(self.root, base, {'visuals': [row, deepcopy(row)]})), 1)
+        (draft / 'assets' / 'page-1.png').write_bytes(b'Not a source image')
+        row['image_sha256'] = workspace.digest(b'Not a source image')
+        self.assertEqual(workspace.verified_visuals(self.root, base, {'visuals': [row]}), [])
+
+    def test_research_map_uses_explicit_saved_steps_and_links_without_fabricated_edges(self):
+        record = {'flow_steps': ['Saved input', 'Saved measurement', 'Saved validation'],
+                  'evidence': [{'id': 'E01', 'locator': 'Methods 2.1', 'observation': 'Saved independent-unit description.'},
+                               {'id': 'E02', 'locator': 'Figure 8', 'claim': 'Uninspected plot interpretation.', 'type': 'figure', 'inspection_status': 'unverified'}],
+                  'claims': [{'id': 'C01', 'text': 'Saved analyst judgment.', 'evidence_ids': ['E01']}],
+                  'actions': [{'id': 'A01', 'title': 'Saved pending pilot.', 'claim_ids': ['C01']},
+                              {'id': 'A02', 'title': 'Unlinked action must remain unlinked.'}]}
+        drawn = workspace.render_research_map(record)
+        self.assertIn('Saved input', drawn)
+        self.assertIn('Saved independent-unit description.', drawn)
+        self.assertIn('Saved analyst judgment.', drawn)
+        self.assertIn('Saved pending pilot.', drawn)
+        self.assertIn('分析者绘制，非论文原图', drawn)
+        self.assertNotIn('Unlinked action', drawn)
+        self.assertNotIn('Uninspected plot', drawn)
+        record['claims'] = []
+        self.assertNotIn('evidence-path', workspace.render_research_map(record))
+        record['actions'][0]['evidence_ids'] = ['E01']
+        self.assertIn('direct-link', workspace.render_research_map(record))
+        self.assertEqual(workspace.render_research_map({'flow_steps': ['Only one saved step']}), '')
 
     def test_legacy_transfer_aliases_use_saved_design_and_preserve_concrete_limits(self):
         design = '分析者建议：将论文的分层采样设计用于本课题的重复性验证。'
