@@ -2,14 +2,30 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {recordEvidence,recordMarkdown,researchFlowSvg,exportResearchMarkdown,exportOfflineHtml} from '../research-export.js';
-const paper={id:'D001',title:'Synthetic <script>not-executable()</script>',authors:['Fixture author'],publication_date:'2026-08',url:'https://papers.example/fixture',themes:['Measurement'],analysis:{summary:'Saved source summary',source_basis:'abstract',verified:false,skill_applied:false,analyzed_date:'2026-10-21',verification_gaps:['No original figure'],source_blocks:[{id:'ABSTRACT-1',text:'Actual text only'}],flow_steps:['Author model','Author measurement'],project_context:{scope_snapshot:{known_resources:'Known resources only'}},research_logic:{storyline:{reconstructed_question:'Reconstructed, not author fact'},reading_priorities:[{locator:'Methods, location unverified',reason:'Check independence',decision_impact:'Whether evidence transfers'}]},actions:[{id:'A01',title:'Check independent reference',priority:'P0',stopping_criteria:'Stop if source is unavailable'}]}};
+const paper={id:'D001',title:'Synthetic <script>not-executable()</script>',authors:['Fixture author'],publication_date:'2026-08',url:'https://papers.example/fixture',themes:['Measurement'],analysis:{summary:'Saved source summary',future_insights:'Use an independent reference for this topic before comparing measurements.',source_basis:'abstract',verified:false,skill_applied:false,analyzed_date:'2026-10-21',verification_gaps:['No original figure'],source_blocks:[{id:'ABSTRACT-1',text:'Actual text only'}],flow_steps:['Author model','Author measurement'],project_context:{scope_snapshot:{known_resources:'Known resources only'}},research_logic:{storyline:{reconstructed_question:'Reconstructed, not author fact'},reading_priorities:[{locator:'Methods, location unverified',reason:'Check independence',decision_impact:'Whether evidence transfers'}]},actions:[{id:'A01',title:'Check independent reference',priority:'P0',stopping_criteria:'Stop if source is unavailable'}]}};
 const bundle={notice:'未执行外部技能；原图与公式未视觉核验。',project:{name:'Synthetic offline project',scope:{research_question:'A specific question',known_resources:'Known resources only'}},papers:[paper],references:[{sha256:'synthetic-fingerprint',text_pages:[{page:1,text:'Reference text actually supplied'}]}],jobs:[{id:'job1',status:'completed',requested:5,reports_generated:1,created_at:'2026-10-21',checkpoint:{candidates:[{paper_id:'D001',title:paper.title,reason:'Source-limited analysis'}],report_shortfall:4,search_log:[{query:'Synthetic query'}],synthesis:{status:'completed',record_ids:['D001'],limitations:['One paper cannot establish cross-paper agreement'],priority_actions:[{record_id:'D001',action_id:'A01',reason:'Reduce uncertainty'}]}}}]};
 
-test('Markdown, evidence and HTML project identical saved content with eleven sections and source boundaries',()=>{
+test('Markdown, evidence and HTML retain saved content and source boundaries without empty report sections',()=>{
   const note=recordMarkdown(paper),evidence=recordEvidence(paper),md=exportResearchMarkdown(bundle),html=exportOfflineHtml(bundle);
-  for(const item of [note,md,html]){assert.match(item,/Saved source summary/);assert.match(item,/Actual text only/);assert.match(item,/Known resources only/);assert.match(item,/Stop if source is unavailable/);for(let i=1;i<=11;i++)assert.match(item,new RegExp(`${i}\\. `));}
+  for(const item of [note,md,html]){assert.match(item,/Saved source summary/);assert.match(item,/Actual text only/);assert.match(item,/Known resources only/);assert.match(item,/Stop if source is unavailable/);assert.match(item,/11\. 下一步研究规划/);assert.doesNotMatch(item,/5\. 重建研究设计|6\. 关键设计决策|7\. 原图、表格与公式核验|未报告或未核验/);}
   assert.deepEqual(evidence.actions,paper.analysis.actions);assert.equal(evidence.verified,false);assert.equal(evidence.skill_applied,false);assert.deepEqual(evidence.source_blocks,paper.analysis.source_blocks);
   for(const item of [md,html]){assert.match(item,/Reference text actually supplied/);assert.match(item,/synthetic-fingerprint/);assert.match(item,/Synthetic query/);assert.match(item,/Source-limited analysis/);assert.match(item,/One paper cannot establish/);}
+});
+
+test('offline report cards expose saved summary and topic relevance before opening details',()=>{
+  const html=exportOfflineHtml(bundle),card=html.match(/<article class="paper-card"[\s\S]*?<\/article>/)[0],preview=card.split('<details>')[0];
+  assert.match(html,/class="paper-grid"/);assert.match(html,/grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);assert.match(html,/@media\(max-width:650px\)/);
+  assert.match(preview,/Saved source summary/);assert.match(preview,/与课题的关系/);assert.match(preview,/Use an independent reference/);assert.doesNotMatch(preview,/Actual text only|Stop if source is unavailable/);assert.match(card,/<details><summary>查看详细分析<\/summary>/);
+  for(const output of [html,exportResearchMarkdown(bundle)]){assert.match(output,/目标新增 5 篇/);assert.match(output,/已新增 1 篇/);assert.doesNotMatch(output,/缺额|复用/);}
+  assert.equal(bundle.jobs[0].checkpoint.report_shortfall,4,'exporting must not rewrite saved diagnostics');
+});
+
+test('unavailable prose and empty source maps do not create exported analysis sections or fake diagrams',()=>{
+  const minimal={id:'D002',title:'A limited source',analysis:{summary:'Only the supplied abstract is summarized.',source_basis:'abstract',research_logic:{study_design:{fields:{samples:'未报告'}},transfer_insights:{direct:'未核验'}},source_blocks:[]}};
+  const html=exportOfflineHtml({project:{name:'Limited topic'},papers:[minimal]}),note=recordMarkdown(minimal);
+  for(const output of [html,note])assert.doesNotMatch(output,/5\. 重建研究设计|4\. 研究流程示意|10\. 未来研究启示|来源尚不足以重建作者研究流程/);
+  assert.doesNotMatch(html,/class="card-relevance"/);assert.doesNotMatch(note,/## 来源映射与实际阅读覆盖|研究流程见 assets/);
+  assert.match(html,/Only the supplied abstract is summarized/);assert.match(html,/尚未完成全部核验/);assert.equal(recordEvidence(minimal).verified,false);
 });
 
 test('offline artifact has local controls and no remote executable dependencies or interpolated script content',()=>{

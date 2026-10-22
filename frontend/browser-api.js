@@ -1,7 +1,7 @@
 import {createResearchSources,mergeSourcePaper,publicDocumentUrl} from './research-sources.js';
-import {normalizeResearchConfig,normalizeResearchLogic,buildReportPrompt,buildScopePrompt,buildSynthesisPrompt,normalizeSynthesis} from './research-contract.js';
+import {normalizeResearchConfig,normalizeResearchLogic,buildReportPrompt,buildScopePrompt,buildSynthesisPrompt,normalizeSynthesis} from './research-contract.js?v=20261022-newtarget';
 import {createDirectoryWorkspaceStore} from './research-storage.js';
-import {researchFlowSvg,exportResearchMarkdown,exportOfflineHtml} from './research-export.js';
+import {researchFlowSvg,exportResearchMarkdown,exportOfflineHtml} from './research-export.js?v=20261022-cards';
 // Browser-owned records. Model credentials intentionally never enter this store.
 const DATABASE = 'paper-workbench-browser-v1';
 const LOCK = 'paper-workbench-browser-analysis-v1';
@@ -77,9 +77,9 @@ const text = value => typeof value==='string'?value.slice(0,40000):'';
 function draftAnalysis(model,paper,date,source,config={}) {
   const fulltext=source?.basis==='fulltext',basis=fulltext?'已取得的全文文字':'实际摘要';
   const a={};
-  for(const key of ['summary','scientific_question','author_conclusions','analyst_inference','variables','samples','equipment','parameters','controls','repeats','statistics','future_insights','transfer_conditions','roadmap'])a[key]=text(model[key])||'已提供的来源未报告足够信息，需核对原文。';
+  for(const key of ['summary','scientific_question','author_conclusions','analyst_inference','variables','samples','equipment','parameters','controls','repeats','statistics','future_insights','transfer_conditions','roadmap'])a[key]=text(model[key]);
   if(!text(model.summary))throw new Error('模型未提供有效分析总结，本篇未计入草稿完成数。');
-  a.flow_steps=strings(model.flow_steps).slice(0,8);if(a.flow_steps.length<2)a.flow_steps=['作者研究对象与输入：当前来源未充分报告','作者操作、测量与验证：须取得原文后重建'];
+  a.flow_steps=strings(model.flow_steps).slice(0,8);
   const allowedIds=new Set((source?.blocks||[]).map(block=>block.id));
   a.evidence=(Array.isArray(model.evidence)?model.evidence:[]).filter(x=>x&&typeof x==='object').slice(0,20).map((x,i)=>({id:'E'+(i+1),claim:text(x.claim),observation:text(x.observation),interpretation:text(x.interpretation),limits:text(x.limits)||(fulltext?'依据提取文字；原图及公式未视觉核验。':'仅依据摘要，全文与原图未核验。'),source_block_ids:strings(x.source_block_ids).filter(id=>allowedIds.has(id)),origin:'analyst_inference'}));
   if(!fulltext)a.evidence.forEach(e=>{if(!e.source_block_ids.length)e.source_block_ids=['ABSTRACT-1'];});
@@ -208,13 +208,19 @@ export function createBrowserApi({store=createDirectoryWorkspaceStore({fallbackS
   }
   function linkPaper(projectId,paperId,jobId){if(!workspace.links.some(x=>x.project_id===projectId&&x.paper_id===paperId))workspace.links.push({project_id:projectId,paper_id:paperId,job_id:jobId});}
   function papersFor(pid){return workspace.links.filter(x=>x.project_id===pid).map(link=>{const paper=workspace.papers.find(x=>x.id===link.paper_id);if(!paper)return null;const origin=paper.origin_project_id||workspace.links.find(x=>x.paper_id===paper.id)?.project_id,transferred=origin&&origin!==pid;return {...paper,analysis:transferred?{...paper.analysis,transfer_notice:'复用原课题研究报告，尚未重新评估当前研究范围；推断与行动需按当前课题核对。'}:paper.analysis,batch_id:link.job_id};}).filter(Boolean);}
+  const registeredInBatch=(job,paper)=>workspace.links.some(link=>link.project_id===job.project_id&&link.paper_id===paper.id&&link.job_id===job.id);
+  function recoverOrExclude(job,candidate,paper){
+    if(registeredInBatch(job,paper)){candidate.status='unverified';candidate.paper_id=paper.id;delete candidate.reused;job.checkpoint.reused=(job.checkpoint.reused||[]).filter(id=>id!==paper.id);candidate.reason='本批研究报告已保存。';}
+    else{candidate.status='duplicate';candidate.existing_paper_id=paper.id;delete candidate.paper_id;delete candidate.reused;candidate.reason='已有分析记录，继续检索尚未分析的论文。';}
+    reportCounts(job);
+  }
   async function stage(job,value){job.stage=value;job.updated_at=now();await save();emit(job);}
   async function analyzeCandidates(job,signal){
     const checkpoint=job.checkpoint;
     const pending=checkpoint.candidates.filter(x=>x.status==='pending');
     for(const candidate of pending){
       checkAbort(signal);const previous=workspace.papers.find(p=>samePaper(p,candidate));
-      if(previous){candidate.status='unverified';candidate.paper_id=previous.id;candidate.reused=true;candidate.reason='复用浏览器库中已有的研究报告，不重复调用模型；请按原报告标注的来源和核验范围阅读。';linkPaper(job.project_id,previous.id,job.id);if(!checkpoint.reused.includes(previous.id))checkpoint.reused.push(previous.id);await save();continue;}
+      if(previous){recoverOrExclude(job,candidate,previous);await save();continue;}
     }
     const available=checkpoint.candidates.filter(x=>x.status==='pending');
     for(let offset=0;offset<available.length;offset+=20){
@@ -238,15 +244,15 @@ export function createBrowserApi({store=createDirectoryWorkspaceStore({fallbackS
         checkAbort(signal);const analysis=draftAnalysis(result,p,now(),source,checkpoint.scope_snapshot);analysis.project_context={project_id:job.project_id,scope_snapshot:researchContext(checkpoint.scope_snapshot)};
         // Registration and identity check happen together, before allocating a draft ID.
         let paper=workspace.papers.find(x=>samePaper(x,p));
-        if(paper){p.reused=true;if(!checkpoint.reused.includes(paper.id))checkpoint.reused.push(paper.id);}
-        else{workspace.counter+=1;paper={...p,id:'D'+String(workspace.counter).padStart(3,'0'),origin_project_id:job.project_id,analysis,tags:[]};delete paper.status;workspace.papers.push(paper);checkpoint.drafts_analyzed+=1;job.drafts_analyzed=checkpoint.drafts_analyzed;}
+        if(paper){recoverOrExclude(job,p,paper);await save();continue;}
+        workspace.counter+=1;paper={...p,id:'D'+String(workspace.counter).padStart(3,'0'),origin_project_id:job.project_id,analysis,tags:[]};delete paper.status;workspace.papers.push(paper);
         p.status='unverified';p.paper_id=paper.id;p.reason=analysis.report_label+'已保存，可直接查看；图表和公式仍待核验。';linkPaper(job.project_id,paper.id,job.id);reportCounts(job);await save();emit(job);
       }
     }
   }
   function reportCounts(job){
-    const checkpoint=job.checkpoint,ids=new Set(checkpoint.candidates.filter(c=>c.paper_id&&!c.reused).map(c=>c.paper_id)),records=workspace.papers.filter(p=>ids.has(p.id));
-    checkpoint.reports_generated=checkpoint.drafts_analyzed||0;job.reports_generated=checkpoint.reports_generated;
+    const checkpoint=job.checkpoint,ids=new Set(checkpoint.candidates.filter(c=>c.paper_id&&!c.reused).map(c=>c.paper_id)),records=workspace.papers.filter(p=>ids.has(p.id)&&registeredInBatch(job,p));
+    checkpoint.drafts_analyzed=records.length;job.drafts_analyzed=records.length;checkpoint.reports_generated=records.length;job.reports_generated=records.length;
     checkpoint.fulltext_reports=records.filter(p=>p.analysis?.source_basis==='fulltext').length;checkpoint.abstract_reports=records.length-checkpoint.fulltext_reports;
     job.fulltext_reports=checkpoint.fulltext_reports;job.abstract_reports=checkpoint.abstract_reports;
     checkpoint.report_shortfall=Math.max(0,job.requested-checkpoint.reports_generated);checkpoint.draft_shortfall=checkpoint.report_shortfall;job.report_shortfall=checkpoint.report_shortfall;
@@ -300,7 +306,7 @@ export function createBrowserApi({store=createDirectoryWorkspaceStore({fallbackS
     const controller=new AbortController();controllers.set(job.id,controller);running=job.id;localRuns.add(LOCK);
     try{
       requireConfig();job.status='running';job.error='';job.cancel_requested=false;await stage(job,'检索');
-      const checkpoint=job.checkpoint,scope=checkpoint.scope_snapshot,queries=searchQueries(scope,projectById(job.project_id).name);checkpoint.search_queries=queries;
+      const checkpoint=job.checkpoint,scope=checkpoint.scope_snapshot,queries=searchQueries(scope,projectById(job.project_id).name);checkpoint.search_queries=queries;reportCounts(job);
       if(checkpoint.candidates.some(c=>c.status==='pending'))await analyzeCandidates(job,controller.signal);
       const year=new Date().getUTCFullYear(),ranges=[year-2,year-5,null];
       for(const from of ranges){

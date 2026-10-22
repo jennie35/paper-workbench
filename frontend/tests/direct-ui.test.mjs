@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import {apiOrigin} from '../workflow.js';
-import {reportSections} from '../research-view.js';
+import {reportSections,hasReportContent} from '../research-view.js';
 
 const code=readFileSync(new URL('../app.js',import.meta.url),'utf8');
 function extract(start,end){
@@ -51,7 +51,7 @@ test('direct settings opened from home stays in API settings and forwards contin
 
 function readerContext(){
   const state={mode:'direct',demo:false,view:'latest',papers:[],jobs:[]},display=[],assets=[];
-  const exportButton={addEventListener(){}},context=vm.createContext({state,esc,reportSections,watermark:'Analysis performed using the norman-paper-reading skill | APPLIED-SIGNATURE',badge:label=>`<span>${esc(label)}</span>`,publicationLink:()=>'',tags:()=>[],showModal:(title,body)=>display.push({title,body}),renderMath(){},loadReaderAssets:async path=>assets.push(path),$:id=>id==='exportCandidate'?exportButton:null});
+  const exportButton={addEventListener(){}},context=vm.createContext({state,esc,reportSections,hasReportContent,watermark:'Analysis performed using the norman-paper-reading skill | APPLIED-SIGNATURE',badge:label=>`<span>${esc(label)}</span>`,publicationLink:()=>'',tags:()=>[],showModal:(title,body)=>display.push({title,body}),renderMath(){},loadReaderAssets:async path=>assets.push(path),$:id=>id==='exportCandidate'?exportButton:null});
   vm.runInContext(extract('function reportLabel(','function badge('),context);
   vm.runInContext(extract('function section(','function renderMath('),context);
   vm.runInContext(extract('async function showPaper(','async function showCandidate('),context);
@@ -61,7 +61,7 @@ function paper(){return {id:'D001',title:'Synthetic abstract-only research',doi:
 
 test('direct draft reader discloses missing full text without claiming Norman was applied',()=>{
   const {context}=readerContext(),markup=context.readingBody(paper(),{draft:true});
-  assert.match(markup,/摘要研究报告/);assert.match(markup,/未执行 norman-paper-reading 外部技能/);assert.match(markup,/报告依据与阅读边界/);assert.match(markup,/未取得全文/);
+  assert.match(markup,/摘要研究报告/);assert.match(markup,/未执行 norman-paper-reading 外部技能/);assert.match(markup,/阅读依据/);assert.match(markup,/摘要草稿；全文、原图、公式均未核验/);
   assert.doesNotMatch(markup,/APPLIED-SIGNATURE|Analysis performed using|分析采用 norman-paper-reading 技能|>已模型核验<|>已完成精读</);
   assert.doesNotMatch(markup,/下载已获取的全文 PDF/);
 });
@@ -69,7 +69,7 @@ test('direct draft reader discloses missing full text without claiming Norman wa
 test('opening a D-number record always uses draft reading even if a stale verified flag is present',async()=>{
   const {state,context,display}=readerContext(),draft=paper();draft.analysis.verified=true;state.papers=[draft];
   await context.showPaper('D001');
-  assert.equal(display.length,1);assert.match(display[0].body,/摘要研究报告/);assert.match(display[0].body,/原图及公式未视觉核验/);assert.match(display[0].body,/未取得全文/);
+  assert.equal(display.length,1);assert.match(display[0].body,/摘要研究报告/);assert.match(display[0].body,/原图及公式未视觉核验/);assert.match(display[0].body,/摘要草稿；全文、原图、公式均未核验/);
   assert.doesNotMatch(display[0].body,/APPLIED-SIGNATURE|Analysis performed using|分析采用 norman-paper-reading 技能|>已模型核验<|>已完成精读</);
   assert.equal(state.papers[0].id,'D001');
 });
@@ -78,7 +78,7 @@ test('D-number paper cards lead to an honestly labelled report without claiming 
   const {context}=readerContext();
   vm.runInContext(extract('function paperCard(','function section('),context);
   const p=paper();p.analysis.verified=true;const markup=context.paperCard(p);
-  assert.match(markup,/D001/);assert.match(markup,/待核验/);assert.match(markup,/摘要研究报告/);assert.match(markup,/阅读报告/);
+  assert.match(markup,/D001/);assert.match(markup,/摘要研究报告/);assert.match(markup,/查看详细分析/);assert.match(markup,/data-open-paper="D001"/);
   assert.doesNotMatch(markup,/进入精读与研究规划|>已模型核验<|>已完成精读</);
 });
 
@@ -87,6 +87,11 @@ test('partial reports with invalid optional arrays remain readable without mutat
   p.analysis={...p.analysis,flow_steps:'One supplied step',actions:[null,{title:'Pending action',evidence_ids:'invalid'}],evidence:[null,{claim:'Unverified claim',source_block_ids:null}],visuals:{invalid:true},sources:null};
   const saved=JSON.stringify(p);vm.runInContext(extract('function paperCard(','function section('),context);
   assert.match(context.paperCard(p),/Generated fixture abstract analysis/);assert.match(context.readingBody(p,{draft:true}),/Unverified claim/);assert.equal(JSON.stringify(p),saved);
+  context.state.view='evidence';
+  for(const priorities of [{invalid:true},[null,{reason:'Check the actual comparator'}]]){
+    p.analysis.research_logic={reading_priorities:priorities};
+    assert.match(context.paperCard(p),/Generated fixture abstract analysis/);
+  }
 });
 
 function directConnectionContext(){

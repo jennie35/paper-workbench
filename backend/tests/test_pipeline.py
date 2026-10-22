@@ -30,7 +30,7 @@ def test_doi_and_version_deduplication():
     assert same_paper(a,b)
 
 
-def test_atomic_numbering_and_cross_project_reuse():
+def test_atomic_numbering_excludes_existing_studies_from_another_project():
     pid,jid=project_job()
     a=analysis()
     assert register(pid,jid,metadata(),a)==(1,True)
@@ -40,7 +40,8 @@ def test_atomic_numbering_and_cross_project_reuse():
     assert register(pid,jid,metadata('Second','10.1234/second'),a)==(2,True)
     with session() as s:
         assert len(s.scalars(select(Paper)).all())==2
-        assert len(s.scalars(select(ProjectPaper)).all())==3
+        assert len(s.scalars(select(ProjectPaper)).all())==2
+        assert not s.scalars(select(ProjectPaper).where(ProjectPaper.project_id == pid2)).all()
 
 
 def test_hallucinated_source_ids_rejected():
@@ -155,6 +156,48 @@ def test_success_and_retry_do_not_duplicate(monkeypatch):
         assert len(s.scalars(select(Paper)).all())==1
 
 
+def test_cross_project_versions_are_skipped_and_expanded_search_fills_new_quota(monkeypatch):
+    first_pid, first_jid = project_job(1)
+    register(first_pid, first_jid, metadata('An existing study', '10.1234/existing'), analysis())
+    pid, jid = project_job(2)
+    old = metadata('A differently named published version', '10.1234/formal')
+    old['versions'] = ['https://doi.org/10.1234/EXISTING']
+    fresh = [metadata('New study A', '10.1234/new-a'), metadata('New study B', '10.1234/new-b')]
+    for paper in fresh:
+        paper['pdf_urls'] = ['https://example.com/paper.pdf']
+    searches, ranked_titles, analyzed = [], [], []
+    def search(*args):
+        searches.append(args[1])
+        return ([old] if len(searches) == 1 else [old, *fresh]), []
+    class AllRelevant(FakeProvider):
+        def json(self, prompt, **kwargs):
+            if '题录：' in prompt:
+                records = json.loads(prompt.split('题录：', 1)[1])
+                ranked_titles.extend(record['title'] for record in records)
+                return {'ranked': [{'index': i, 'relevant': True, 'relevance': 3, 'reason': 'Directly related'} for i in range(len(records))]}
+            return {}
+    def analyze(_provider, _skill, paper, *_args):
+        analyzed.append(paper['doi'])
+        return dict(analysis(), verified=True)
+    monkeypatch.setattr('app.pipeline.search', search)
+    monkeypatch.setattr('app.pipeline.challenge_image', lambda path: None)
+    monkeypatch.setattr('app.pipeline.download', lambda url, path: path.write_bytes(b'%PDF-fixture'))
+    monkeypatch.setattr('app.pipeline.inspect_pdf', lambda path: ['Fixture'])
+    monkeypatch.setattr('app.pipeline.analyze', analyze)
+    _run_job(jid, provider=AllRelevant(), skill=FakeSkill())
+    _run_job(jid, provider=AllRelevant(), skill=FakeSkill())
+    with session() as s:
+        state = json.loads(s.get(Job, jid).checkpoint)
+        assert state['actual'] == 2 and state['shortfall'] == 0
+        assert state['reused'] == []
+        assert state['completed'] == ['R002', 'R003']
+        assert {link.paper_number for link in s.scalars(select(ProjectPaper).where(ProjectPaper.project_id == pid))} == {2, 3}
+        assert len(s.scalars(select(Paper)).all()) == 3
+    assert len(searches) == 2
+    assert old['title'] not in ranked_titles
+    assert analyzed == ['10.1234/new-a', '10.1234/new-b']
+
+
 @pytest.mark.parametrize('omit_reconciled_logic', [False, True])
 def test_analysis_pipeline_inspects_and_reconciles_originals(omit_reconciled_logic):
     from app.pipeline import analyze
@@ -224,7 +267,7 @@ def test_scope_change_invalidates_cached_draft():
 def test_recovery_after_commit_before_checkpoint(monkeypatch):
     pid,jid=project_job(1)
     p=metadata('Commit recovery fixture','10.1234/recovery')
-    register(pid,jid,p,analysis())
+    register(pid,jid,p,dict(analysis(), project_context={'project_id': pid}))
     with session() as s:
         j=s.get(Job,jid)
         j.checkpoint=json.dumps({'candidates':[dict(p,status='pending',relevant=True)],'search_windows':[__import__('datetime').date.today().year-1]})
@@ -234,6 +277,56 @@ def test_recovery_after_commit_before_checkpoint(monkeypatch):
         state=json.loads(s.get(Job,jid).checkpoint)
         assert state['actual']==1 and state['shortfall']==0
         assert len(s.scalars(select(Paper)).all())==1
+
+
+@pytest.mark.parametrize('provenance', ['checkpoint', 'transfer_notice', 'link_context', 'canonical_context'])
+@pytest.mark.parametrize('polluted_completed', [False, True])
+def test_legacy_cross_project_links_cannot_be_recovered_as_new_papers(monkeypatch, provenance, polluted_completed):
+    original_pid, original_jid = project_job(1)
+    old = metadata('Previously analyzed study', '10.1234/legacy-associated')
+    original_analysis = analysis()
+    if provenance == 'canonical_context':
+        original_analysis['project_context'] = {'project_id': original_pid}
+    register(original_pid, original_jid, old, original_analysis)
+    pid, jid = project_job(1)
+    transferred = dict(analysis())
+    if provenance == 'transfer_notice':
+        transferred['transfer_notice'] = '复用既有分析；当前课题适用性尚待重新评估'
+    if provenance == 'link_context':
+        transferred['project_context'] = {'project_id': original_pid}
+    with session() as s:
+        # Reproduce the exact older storage shape: a foreign report is linked
+        # with the current job ID, so checking job_id alone is insufficient.
+        s.add(ProjectPaper(id=str(uuid.uuid4()), project_id=pid, paper_number=1, job_id=jid, analysis_json=json.dumps(transferred)))
+        j = s.get(Job, jid)
+        j.status = 'failed'
+        j.checkpoint = json.dumps({
+            'candidates': [dict(old, status='completed' if polluted_completed else 'pending', relevant=True, **({'paper_id': 'R001'} if polluted_completed else {}))],
+            'completed': ['R001'] if polluted_completed else [],
+            'reused': ['R001'] if provenance == 'checkpoint' else [],
+        })
+    fresh = metadata('Actually new study', '10.1234/actually-new')
+    fresh['pdf_urls'] = ['https://example.com/paper.pdf']
+    analyzed = []
+    def analyze(_provider, _skill, paper, *_args):
+        analyzed.append(paper['doi'])
+        return dict(analysis(), verified=True, project_context={'project_id': pid})
+    monkeypatch.setattr('app.pipeline.search', lambda *args: ([old, fresh], []))
+    monkeypatch.setattr('app.pipeline.challenge_image', lambda path: None)
+    monkeypatch.setattr('app.pipeline.download', lambda url, path: path.write_bytes(b'%PDF-fixture'))
+    monkeypatch.setattr('app.pipeline.inspect_pdf', lambda path: ['Fixture'])
+    monkeypatch.setattr('app.pipeline.analyze', analyze)
+    _run_job(jid, provider=FakeProvider(), skill=FakeSkill())
+    _run_job(jid, provider=FakeProvider(), skill=FakeSkill())
+    with session() as s:
+        state = json.loads(s.get(Job, jid).checkpoint)
+        assert state['actual'] == 1 and state['completed'] == ['R002']
+        assert state['reused'] == ['R001']
+        assert state['candidates'][0]['status'] == 'duplicate'
+        assert state['candidates'][0].get('paper_id') is None
+        assert len(s.scalars(select(Paper)).all()) == 2
+        assert len(s.scalars(select(ProjectPaper).where(ProjectPaper.project_id == pid)).all()) == 2
+    assert analyzed == [fresh['doi']]
 
 
 def test_changed_pdf_cannot_reuse_old_source_mapping():

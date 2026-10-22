@@ -241,6 +241,52 @@ def actions_from(evidence):
     return actions if isinstance(actions, list) else []
 
 
+def available(value):
+    """Suppress empty template placeholders without rewriting saved research."""
+    if isinstance(value, str):
+        value = value.strip()
+        return bool(value) and not re.fullmatch(r"(?:未报告|未核验|未知|未提供|未记录|暂无|不适用|待补充|待填写|none|null|n/?a|[-—–]+)[。.;；\s]*", value, re.I)
+    return value is not None and value != [] and value != {}
+
+
+def display_text(value):
+    """Flatten saved prose fields; no inference or executable Markdown/HTML."""
+    if isinstance(value, str):
+        return value.strip() if available(value) else ""
+    if isinstance(value, list):
+        return "；".join(filter(None, (display_text(item) for item in value)))
+    if isinstance(value, dict):
+        return "；".join(display_text(value[key]) for key in ("summary", "text", "insight", "implication", "description", "reason", "title", "locator", "judgement_change", "judgment_change", "direct", "adapt", "avoid") if available(value.get(key)))
+    return str(value) if available(value) else ""
+
+
+def note_section(text, terms):
+    """Read an explicitly saved note section as a card excerpt, never invent one."""
+    for match in re.finditer(r"(?m)^#{1,4}\s+(.+)\n([\s\S]*?)(?=^#{1,4}\s+|\Z)", text):
+        if any(term in match.group(1) for term in terms):
+            lines = [line.strip() for line in match.group(2).splitlines() if available(line)]
+            return " ".join(lines)
+    return ""
+
+
+def available_note(text):
+    """Omit standalone empty template rows; preserve substantive limitations."""
+    sections = re.split(r"(?m)(?=^#{1,6}\s)", text)
+    shown = []
+    for section in sections:
+        lines = []
+        for line in section.splitlines():
+            content = re.sub(r"^\s*(?:[-*>]\s*)?", "", line).strip()
+            field = re.split(r"[:：]", content, maxsplit=1)
+            if content and (not available(content) or len(field) == 2 and not available(field[1])):
+                continue
+            lines.append(line)
+        body = [line for line in lines if line.strip() and not line.startswith("#")]
+        if body:
+            shown.append("\n".join(lines).strip())
+    return "\n\n".join(shown)
+
+
 def validate_evidence(root, base, evidence):
     if not isinstance(evidence, dict):
         raise WorkspaceError("evidence.json must be a JSON object; its contents are not executed")
@@ -258,8 +304,10 @@ def validate_evidence(root, base, evidence):
 
 def render_action(action):
     if not isinstance(action, dict):
-        return "<li>" + esc(action) + " · 待执行</li>"
-    name = action.get("title") or action.get("question") or action.get("hypothesis") or "待明确行动"
+        return "<li>" + esc(action) + " · 待执行</li>" if available(action) else ""
+    name = next((action[key] for key in ("title", "question", "hypothesis") if available(action.get(key))), "")
+    if not name:
+        return ""
     action = {**action, "evidence_gap": action.get("evidence_gap") or action.get("gap"),
               "criteria": action.get("criteria") or action.get("decision_rule")}
     fields = [("证据缺口", "evidence_gap"), ("待回答问题", "question"), ("假设", "hypothesis"), ("方法", "method"),
@@ -268,12 +316,13 @@ def render_action(action):
               ("判断依据", "criteria"), ("资源", "resources"),
               ("前置条件", "prerequisites"), ("交付成果", "deliverable"),
               ("停止条件", "stopping_criteria"), ("样本量依据", "sample_size_basis")]
-    detail = "".join(f"<dt>{label}</dt><dd>{esc(action[key])}</dd>" for label, key in fields if action.get(key))
-    return f'<li><strong>{esc(name)}</strong> <span class="badge">待执行 · {esc(action.get("priority", "未指定优先级"))}</span><dl>{detail}</dl></li>'
+    detail = "".join(f"<dt>{label}</dt><dd>{esc(display_text(action[key]))}</dd>" for label, key in fields if available(action.get(key)))
+    priority = " · " + str(action["priority"]) if available(action.get("priority")) else ""
+    return f'<li><strong>{esc(name)}</strong> <span class="action-state">待执行{esc(priority)}</span><dl>{detail}</dl></li>'
 
 
 def render_runs(root):
-    """Display supplied batch documents verbatim as escaped text, never synthesize."""
+    """Link saved batch documents without repeating their full text in the library."""
     runs = root / "runs"
     if not runs.exists():
         return ""
@@ -294,11 +343,10 @@ def render_runs(root):
             within(root, relative)
             if not path.is_file():
                 raise WorkspaceError("Saved batch document must be a local file")
-            text = path.read_text(encoding="utf-8-sig")
-            files.append(f'<details><summary>{label}</summary><p><a href="{href(relative)}">打开保存文件</a></p><pre>{esc(text)}</pre></details>')
+            files.append(f'<a href="{href(relative)}">{label} ↗</a>')
         if files:
             blocks.append(f'<section class="run"><h3>{esc(run.name)}</h3>{"".join(files)}</section>')
-    return ('<details class="run-archive"><summary>跨论文综合与当次简报 <span>打开保存的批次资料 ↗</span></summary><section aria-label="批次综合与简报"><p class="muted">下列内容来自已保存的批次资料；本地构建工具只展示，不生成或核验研究结论。</p>' + "".join(blocks) + "</section></details>") if blocks else ""
+    return ('<details class="run-archive"><summary>研究批次 <span>打开保存的综合与简报 ↗</span></summary><section aria-label="批次综合与简报">' + "".join(blocks) + "</section></details>") if blocks else ""
 
 
 def record_sort_key(record):
@@ -327,11 +375,17 @@ article{position:relative;display:grid;grid-template-columns:128px minmax(0,1fr)
 @media(min-width:1500px){body{padding:0 56px}.workspace{gap:70px}}@media(max-width:1100px){body{padding:0 28px}.workspace{grid-template-columns:150px minmax(0,1fr);gap:32px}.hero-bottom{gap:20px}.library-stats{gap:20px}.library-stats dd{font-size:42px}.filters{grid-template-columns:minmax(180px,1.5fr) repeat(2,minmax(108px,1fr))}.filters label:nth-child(4){border-left:0;padding-left:0;border-top:1px solid var(--line)}.filters label:nth-child(5){border-top:1px solid var(--line)}article{grid-template-columns:100px minmax(0,1fr);gap:18px}.badge{font-size:26px}}
 @media(max-width:760px){body{padding:0 20px}.masthead{height:68px}.brand{font-size:18px}.brand small{display:none}.local-label{font-size:9px}.workspace{display:block}.sidebar{position:static;padding-top:0}.rail-label,.rail-note{display:none}.sidebar nav{grid-template-columns:repeat(4,minmax(0,1fr));margin-top:3px}.sidebar button{gap:6px;font-size:11px;padding:17px 0 14px;justify-content:center}.sidebar button:after{display:none}.nav-number{width:auto;font-size:10px}.hero{padding:30px 0 20px}h1{font-size:38px;line-height:1.25;margin-bottom:23px}.eyebrow{font-size:8px;letter-spacing:.12em;margin-bottom:20px}.hero-bottom{grid-template-columns:1fr;gap:20px}.research-question{font-size:12px;max-width:100%}.library-stats{justify-content:flex-start;gap:45px}.library-stats div{display:flex;flex-direction:column-reverse;gap:6px}.library-stats dd{font-size:41px}.library-stats dt{font-size:10px}.verification-note{font-size:9px;margin-top:19px}.catalog-heading h2{font-size:25px}.catalog-heading span{display:none}.catalog-bar{margin-top:12px}.filters{grid-template-columns:repeat(2,minmax(0,1fr))}.filters .filter-search{grid-column:1/-1;padding:12px 0;border-bottom:1px solid var(--line)}.filters label:nth-child(2),.filters label:nth-child(4){border-left:0;padding-left:0}.filters label:nth-child(3){border-left:1px solid var(--line);padding-left:13px}.filters label:nth-child(4),.filters label:nth-child(5){border-top:1px solid var(--line)}.filters label:nth-child(5){border-left:1px solid var(--line);padding-left:13px}input,select{font-size:12px}article{grid-template-columns:65px minmax(0,1fr);gap:15px;padding:24px 0}.badge{font-size:23px}.record-status{font-size:9px;padding-left:8px}.record-date{font-size:8px;margin-top:16px}article header h2{font-size:21px;line-height:1.5}.record-theme,article header p{font-size:9px}.record-summary{font-size:11px}.files{font-size:9px;gap:9px 14px}article summary{font-size:10px}.actions dl{display:block}.actions dt{margin-top:12px}.actions dd{margin:3px 0}.run-archive>summary{font-size:17px}.run-archive>summary>span{display:none}footer{display:block;font-size:9px}footer .updated{text-align:left;margin-top:16px}footer .updated span{display:inline;margin-right:10px}}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;scroll-behavior:auto!important}}@media print{body{padding:0;background:white}.sidebar,.filters{display:none}.workspace{display:block}.masthead{height:58px}.hero{padding-top:25px}article{break-inside:avoid}.content{width:100%}footer{border-top:1px solid var(--line)}}
+.catalog-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;padding-top:22px}.catalog-list article{display:flex;flex-direction:column;gap:0;min-width:0;min-height:360px;padding:24px;border:1px solid var(--line);background:var(--paper);transition:border-color .15s,transform .15s}.catalog-list article:hover{border-color:#9a8c83;transform:translateY(-2px)}.record-index{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 0 20px}.badge{font-size:23px}.record-status{margin:0}.record-body{display:flex;flex:1;flex-direction:column}.record-date{margin:0}.record-theme{font-size:10px}.catalog-list article header h2{font-size:23px;margin:0 0 12px}.record-open{display:block;text-align:left;padding:0;font:inherit;line-height:inherit;letter-spacing:inherit}.record-open:hover{color:var(--accent)}.record-summary,.record-relevance{font-size:12px;line-height:1.85;margin:0 0 16px;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;overflow:hidden}.record-relevance{border-left:2px solid #c5b1a7;padding-left:12px;color:#59504c}.record-relevance b{display:block;font-size:9px;letter-spacing:.06em;margin-bottom:5px;color:var(--accent)}.card-footer{display:flex;justify-content:space-between;gap:14px;align-items:center;margin-top:auto;padding-top:19px;border-top:1px solid var(--line);font-size:10px}.card-detail{padding:0;color:var(--accent)}.card-preview{font-size:11px;line-height:1.85;display:none;border-top:1px solid var(--line);padding-top:12px;margin-bottom:18px}.card-preview p{margin:0}.card-preview b{font-size:10px}body[data-view=evidence] .card-preview.selected,body[data-view=actions] .card-preview.actions{display:block}.reader-dialog{color:var(--ink);background:var(--paper);width:min(1000px,calc(100vw - 44px));max-height:92dvh;border:1px solid #a5a6a5;padding:0;overflow:auto}.reader-dialog::backdrop{background:#20242e99;backdrop-filter:blur(3px)}.reader-toolbar{position:sticky;top:0;z-index:2;background:var(--paper);padding:16px 30px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:16px;font-size:11px}.reader-toolbar button{padding:4px 0;color:var(--accent)}.reader-content{padding:35px 50px 48px;max-width:920px;margin:auto}.reader-content h2{font:400 34px/1.4 var(--serif);letter-spacing:-.025em;margin-bottom:18px}.reader-content h3{font:400 23px var(--serif);margin:32px 0 15px}.reader-content pre{font-size:13px;line-height:2}.reader-content .files{font-size:11px;border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:25px}.reader-content .selected,.reader-content .actions{display:block}.reader-content .selected li,.reader-content .actions li{font-size:13px}.reader-content .actions dl{display:grid;grid-template-columns:8em minmax(0,1fr);gap:7px 16px;font-size:12px}.reader-content .actions dd{margin:0}.reader-content .actions dt{color:var(--muted)}.action-state{display:block;margin-top:5px;font-size:10px;color:var(--accent)}.run{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px 24px}.run h3{margin-right:auto}.run a{font-size:11px}.target-count{font-size:11px;color:var(--accent);margin:16px 0 0}.record-meta{font-size:11px;color:var(--muted)}
+@media(min-width:1350px){.catalog-list{grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.catalog-list article{padding:23px}.catalog-list article header h2{font-size:21px}}
+@media(max-width:980px){.catalog-list{grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}.catalog-list article{padding:20px}.catalog-list article header h2{font-size:22px}}
+@media(max-width:600px){.catalog-list{grid-template-columns:1fr;gap:16px}.catalog-list article{min-height:320px}.reader-dialog{width:calc(100vw - 20px);max-height:95dvh}.reader-toolbar{padding:13px 20px}.reader-content{padding:24px 23px 35px}.reader-content h2{font-size:28px}.reader-content .actions dl{display:block}.reader-content .actions dt{margin-top:10px}}
+@media print{.catalog-list{display:block}.catalog-list article{margin-bottom:20px}.reader-dialog[open]{position:static;max-height:none;width:auto;overflow:visible}.reader-toolbar{display:none}}
 """
 
 
 def render(root, config, ledger):
     articles = []
+    dialogs = []
     for record in sorted(ledger["records"], key=record_sort_key, reverse=True):
         meta = record["metadata"]
         base = record["path"]
@@ -342,7 +396,7 @@ def render(root, config, ledger):
         authors = " · ".join(str(item) for item in authors) if isinstance(authors, list) else str(authors)
         themes = ", ".join(str(item) for item in meta.get("themes", []))
         priorities = {str(item.get("priority", "")) for item in actions_from(evidence) if isinstance(item, dict)}
-        search = " ".join([record["id"], meta["title"], authors, themes, text])
+        search = " ".join([record["id"], meta["title"], authors, themes, available_note(text)])
         source_links = []
         for sub in ("source", "assets"):
             directory = folder / sub
@@ -355,7 +409,7 @@ def render(root, config, ledger):
         external = safe_url(meta.get("url"))
         if not external and norm_doi(meta.get("doi")):
             external = "https://doi.org/" + norm_doi(meta["doi"])
-        source = f'<a href="{esc(external)}" rel="noreferrer">原文</a>' if external else "原文链接未提供"
+        source = f'<a href="{esc(external)}" rel="noreferrer">原文 ↗</a>' if external else ""
         original = []
         for image in evidence.get("original_images", []):
             if not isinstance(image, dict) or not image.get("path"):
@@ -365,7 +419,9 @@ def render(root, config, ledger):
             original.append(f'<figure><a href="{href(image_path)}"><img loading="lazy" src="{href(image_path)}" alt="{esc(image.get("caption", "来源图像"))}"></a><figcaption>{esc(image.get("caption", ""))} · {esc(image.get("verification_status", "未核验"))}（按保存记录显示；图片存在不代表已目视核验）</figcaption></figure>')
         logic = evidence.get("research_logic")
         reading = evidence.get("reading_priorities", (logic if isinstance(logic, dict) else {}).get("reading_priorities", []))
-        selected = "".join("<li>" + esc(item) + "</li>" for item in reading) if isinstance(reading, list) else ""
+        reading = [display_text(item) for item in reading if available(item)] if isinstance(reading, list) else []
+        reading = [item for item in reading if item]
+        selected = "".join("<li>" + esc(item) + "</li>" for item in reading)
         date = str(meta.get("analysis_date") or record["added_at"][:10])
         reader_link = ""
         if (folder / "reader.html").exists():
@@ -374,20 +430,37 @@ def render(root, config, ledger):
                 raise WorkspaceError("reader.html must be a local file")
             reader_link = f'<a href="{href(reader_path)}">排版阅读页</a>'
         status_label = {"complete": "完成阅读", "partial": "部分报告", "candidate": "仅候选"}[meta["reading_status"]]
-        summary = evidence.get("summary")
-        summary = summary if isinstance(summary, str) and summary.strip() else "尚未保存简明总结，请展开阅读报告查看已记录内容与证据边界。"
+        summary = display_text(evidence.get("summary")) or note_section(text, ("论文总结", "简明总结", "Summary"))
+        logic = logic if isinstance(logic, dict) else {}
+        relevance = next((value for data in (evidence, logic) for key in ("topic_relevance", "project_relevance", "research_relevance", "future_insights", "research_implications", "transfer_insights") if (value := display_text(data.get(key)))), "")
+        relevance = relevance or note_section(text, ("未来研究启示", "课题相关", "研究迁移", "Implications"))
+        summary_html = f'<p class="record-summary">{esc(summary)}</p>' if summary else ""
+        relevance_html = f'<p class="record-relevance"><b>与本课题的联系</b>{esc(relevance)}</p>' if relevance else ""
+        action_html = "".join(render_action(action) for action in actions_from(evidence))
+        action_names = [str(action.get("title") or action.get("question") or "") for action in actions_from(evidence) if isinstance(action, dict)]
+        action_names = [name for name in action_names if available(name)]
+        selected_preview = f'<div class="card-preview selected"><b>精选精读</b><p>{esc(reading[0])}</p></div>' if reading else ""
+        action_preview = f'<div class="card-preview actions"><b>待执行行动</b><p>{esc("；".join(action_names[:2]))}</p></div>' if action_names else ""
+        citation = " · ".join(str(value) for value in (authors, meta.get("venue"), meta.get("year")) if available(value))
+        dialog_id = "reading-" + record["id"]
+        theme_html = f'<div class="record-theme">{esc(themes)}</div>' if themes else ""
         articles.append(f'''<article data-search="{esc(search.casefold())}" data-date="{esc(date)}" data-theme="{esc(themes.casefold())}" data-priority="{esc(' '.join(priorities))}" data-selected="{'yes' if selected else 'no'}">
-<div class="record-index"><span class="badge">{esc(record['id'])}</span><span class="record-status" title="保存的阅读状态：{esc(meta['reading_status'])}">{status_label}</span><p class="record-date">{esc(date)}</p></div><div class="record-body"><header><div class="record-theme">{esc(themes) or '主题尚未标注'}</div><h2>{esc(meta['title'])}</h2><p>{esc(authors)} · {esc(meta.get('year', '年份未核实'))} · {source}</p></header><p class="record-summary">{esc(summary)}</p>
-<div class="reading"><div class="files">{reader_link}<a href="{href(base + '/reading-note.md')}">阅读笔记</a><a href="{href(base + '/evidence.json')}">证据 JSON</a><a href="{href(base + '/metadata.json')}">题录与阅读状态</a></div><details><summary>展开完整阅读报告</summary><pre>{esc(text)}</pre></details>{''.join(original)}<details><summary>来源与图像文件</summary><ul>{''.join(source_links) or '<li>未保存来源文件</li>'}</ul></details></div>
-<section class="selected"><h3>需要重点精读的证据</h3><ul>{selected or '<li>未记录具体精读位置</li>'}</ul></section><section class="actions"><h3>下一步研究</h3><ul>{''.join(render_action(action) for action in actions_from(evidence)) or '<li>尚未记录行动卡</li>'}</ul></section></div></article>''')
+<div class="record-index"><span class="badge">{esc(record['id'])}</span><span class="record-status" title="保存的阅读状态：{esc(meta['reading_status'])}">{status_label}</span></div><div class="record-body"><header>{theme_html}<h2><button class="record-open" data-open="{dialog_id}" aria-haspopup="dialog" aria-controls="{dialog_id}">{esc(meta['title'])}</button></h2>{f'<p>{esc(citation)}</p>' if citation else ''}</header>{summary_html}{relevance_html}{selected_preview}{action_preview}<div class="card-footer"><span class="record-date">{esc(date)}</span><button class="card-detail" data-open="{dialog_id}" aria-haspopup="dialog" aria-controls="{dialog_id}">查看详细分析 ↗</button></div></div></article>''')
+        original_html = '<section><h3>保存的原图与核验记录</h3>' + "".join(original) + '</section>' if original else ""
+        selected_html = f'<section class="selected"><h3>需要重点精读的证据</h3><ul>{selected}</ul></section>' if selected else ""
+        actions_html = f'<section class="actions"><h3>下一步研究 · 待执行</h3><ul>{action_html}</ul></section>' if action_html else ""
+        sources_html = f'<details><summary>来源与图像文件</summary><ul>{"".join(source_links)}</ul></details>' if source_links else ""
+        note = available_note(text)
+        report_html = f'<section><h3>研究分析</h3><pre>{esc(note)}</pre></section>' if note else ""
+        dialogs.append(f'''<dialog class="reader-dialog" id="{dialog_id}" aria-labelledby="title-{esc(record['id'])}"><div class="reader-toolbar"><span>{esc(record['id'])} · {status_label}</span><button data-close="{dialog_id}" autofocus>关闭 · 返回文献库 ×</button></div><div class="reader-content"><h2 id="title-{esc(record['id'])}">{esc(meta['title'])}</h2>{f'<p class="record-meta">{esc(citation)}</p>' if citation else ''}{summary_html}{relevance_html}<div class="files">{source}{reader_link}<a href="{href(base + '/reading-note.md')}">阅读笔记</a><a href="{href(base + '/evidence.json')}">证据 JSON</a><a href="{href(base + '/metadata.json')}">题录与阅读状态</a></div>{report_html}{original_html}{selected_html}{actions_html}{sources_html}</div></dialog>''')
     complete = sum(item["metadata"]["reading_status"] == "complete" for item in ledger["records"])
     return f'''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data: file:; connect-src 'none'; base-uri 'none'; form-action 'none'"><title>{esc(config['project_name'])} · 文献研究</title><style>
 {DASHBOARD_CSS}
 </style></head><body data-view="recent"><header class="masthead"><div class="brand"><span class="brand-dot" aria-hidden="true">·</span>研序 <small>Paper Workbench</small></div><span class="local-label">本地研究档案 · OFFLINE LIBRARY</span></header>
 <div class="workspace"><aside class="sidebar"><p class="rail-label">Research index / 研究目录</p><nav aria-label="研究视图"><button data-view="recent" aria-pressed="true"><span class="nav-number" aria-hidden="true">I.</span>最近更新</button><button data-view="all" aria-pressed="false"><span class="nav-number" aria-hidden="true">II.</span>全部文献</button><button data-view="evidence" aria-pressed="false"><span class="nav-number" aria-hidden="true">III.</span>精选精读</button><button data-view="actions" aria-pressed="false"><span class="nav-number" aria-hidden="true">IV.</span>下一步研究</button></nav><p class="rail-note"><b>可追溯的阅读<br>有边界的推断<br>可检验的行动</b><span>Read. Question. Test.</span>从保存的证据出发，<br>让下一步研究有据可循。</p></aside>
-<main class="content"><section class="hero"><p class="eyebrow">Personal research library / 课题文献库</p><h1>{esc(config['project_name'])}</h1><div class="hero-bottom"><p class="research-question">{esc(config['research_question'])}</p><dl class="library-stats"><div><dt>累计登记</dt><dd>{len(ledger['records']):02d}<span>篇</span></dd></div><div><dt>按保存状态完成阅读</dt><dd>{complete:02d}<span>篇</span></dd></div></dl></div><p class="verification-note">阅读状态来自人工保存记录。结构检查不等于科学结论得到验证。</p></section>
-<section aria-label="文献目录"><div class="catalog-bar"><div class="catalog-heading"><h2 id="view-title">最近更新</h2><span id="view-caption">Recently updated</span></div><p id="count" aria-live="polite"></p></div><div class="filters"><label class="filter-search"><span>检索已保存的研究</span><input type="search" id="q" placeholder="关键词、作者或论文编号…" aria-label="关键词"></label><label><span>起始日期</span><input type="date" id="from" aria-label="起始日期"></label><label><span>结束日期</span><input type="date" id="to" aria-label="结束日期"></label><label><span>研究主题</span><input id="theme" placeholder="全部主题" aria-label="主题"></label><label><span>行动优先级</span><select id="priority" aria-label="优先级"><option value="">全部优先级</option><option>P0</option><option>P1</option><option>P2</option><option>高</option><option>中</option><option>低</option></select></label></div><div class="catalog-list">{''.join(articles)}</div><p id="empty" hidden>没有符合条件的文献。</p></section>{render_runs(root)}<footer><p>本页由本地记录构建，无网络检索、模型调用或自动执行。原文链接由你点击打开。完整内容以 reading-note.md 与 evidence.json 为准。最近更新显示最多 20 条，全部文献不限制条数。</p><p class="updated"><span>Last updated</span>{esc(ledger.get('updated_at', ''))}</p></footer></main></div>
-<script>(()=>{{'use strict';const fields=['q','from','to','theme','priority'].map(id=>document.getElementById(id));const cards=[...document.querySelectorAll('article')];let view='recent';function filter(){{const [q,from,to,theme,priority]=fields.map(el=>el.value.trim().toLowerCase());let shown=0;for(const card of cards){{const d=card.dataset;const match=(!q||d.search.includes(q))&&(!from||d.date>=from)&&(!to||d.date<=to)&&(!theme||d.theme.includes(theme))&&(!priority||d.priority.toLowerCase().split(' ').includes(priority))&&(view!=='evidence'||d.selected==='yes');card.hidden=!match||(view==='recent'&&shown>=20);if(!card.hidden)shown++;}}document.getElementById('count').textContent='当前显示 '+shown+' 篇';document.getElementById('empty').hidden=shown>0;}}for(const field of fields)field.addEventListener('input',filter);for(const button of document.querySelectorAll('button[data-view]'))button.addEventListener('click',()=>{{view=button.dataset.view;document.body.dataset.view=view;const labels={{recent:['最近更新','Recently updated'],all:['全部文献','The research catalog'],evidence:['精选精读','Evidence worth reading'],actions:['下一步研究','From evidence to action']}};document.getElementById('view-title').textContent=labels[view][0];document.getElementById('view-caption').textContent=labels[view][1];for(const item of document.querySelectorAll('button[data-view]'))item.setAttribute('aria-pressed',String(item===button));filter();}});filter();}})();</script></body></html>'''.encode("utf-8")
+<main class="content"><section class="hero"><p class="eyebrow">Personal research library / 课题文献库</p><h1>{esc(config['project_name'])}</h1><div class="hero-bottom"><p class="research-question">{esc(config['research_question'])}</p><dl class="library-stats"><div><dt>累计登记</dt><dd>{len(ledger['records']):02d}<span>篇</span></dd></div><div><dt>按保存状态完成阅读</dt><dd>{complete:02d}<span>篇</span></dd></div></dl></div><p class="target-count">目标新增 {esc(config.get("default_count", 5))} 篇</p><p class="verification-note">阅读状态来自保存记录。结构检查不等于科学结论得到验证。</p></section>
+<section aria-label="文献目录"><div class="catalog-bar"><div class="catalog-heading"><h2 id="view-title">最近更新</h2><span id="view-caption">Recently updated</span></div><p id="count" aria-live="polite"></p></div><div class="filters"><label class="filter-search"><span>检索已保存的研究</span><input type="search" id="q" placeholder="关键词、作者或论文编号…" aria-label="关键词"></label><label><span>起始日期</span><input type="date" id="from" aria-label="起始日期"></label><label><span>结束日期</span><input type="date" id="to" aria-label="结束日期"></label><label><span>研究主题</span><input id="theme" placeholder="全部主题" aria-label="主题"></label><label><span>行动优先级</span><select id="priority" aria-label="优先级"><option value="">全部优先级</option><option>P0</option><option>P1</option><option>P2</option><option>高</option><option>中</option><option>低</option></select></label></div><div class="catalog-list">{''.join(articles)}</div><p id="empty" hidden>没有符合条件的文献。</p></section>{render_runs(root)}<footer><p>本页由本地记录构建，无网络检索、模型调用或自动执行。原文链接由你点击打开。完整内容以 reading-note.md 与 evidence.json 为准。最近更新显示最多 20 条，全部文献不限制条数。</p><p class="updated"><span>Last updated</span>{esc(ledger.get('updated_at', ''))}</p></footer></main></div>{"".join(dialogs)}
+<script>(()=>{{'use strict';const fields=['q','from','to','theme','priority'].map(id=>document.getElementById(id));const cards=[...document.querySelectorAll('.catalog-list article')];for(const button of document.querySelectorAll('[data-open]'))button.addEventListener('click',()=>{{const dialog=document.getElementById(button.dataset.open);dialog.showModal();}});for(const button of document.querySelectorAll('[data-close]'))button.addEventListener('click',()=>document.getElementById(button.dataset.close).close());for(const dialog of document.querySelectorAll('dialog'))dialog.addEventListener('click',event=>{{if(event.target===dialog){{const r=dialog.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom)dialog.close();}}}});let view='recent';function filter(){{const [q,from,to,theme,priority]=fields.map(el=>el.value.trim().toLowerCase());let shown=0;for(const card of cards){{const d=card.dataset;const match=(!q||d.search.includes(q))&&(!from||d.date>=from)&&(!to||d.date<=to)&&(!theme||d.theme.includes(theme))&&(!priority||d.priority.toLowerCase().split(' ').includes(priority))&&(view!=='evidence'||d.selected==='yes');card.hidden=!match||(view==='recent'&&shown>=20);if(!card.hidden)shown++;}}document.getElementById('count').textContent='当前显示 '+shown+' 篇';document.getElementById('empty').hidden=shown>0;}}for(const field of fields)field.addEventListener('input',filter);for(const button of document.querySelectorAll('button[data-view]'))button.addEventListener('click',()=>{{view=button.dataset.view;document.body.dataset.view=view;const labels={{recent:['最近更新','Recently updated'],all:['全部文献','The research catalog'],evidence:['精选精读','Evidence worth reading'],actions:['下一步研究','From evidence to action']}};document.getElementById('view-title').textContent=labels[view][0];document.getElementById('view-caption').textContent=labels[view][1];for(const item of document.querySelectorAll('button[data-view]'))item.setAttribute('aria-pressed',String(item===button));filter();}});filter();}})();</script></body></html>'''.encode("utf-8")
 
 
 def publish(root, ledger, page, base_ledger=None):

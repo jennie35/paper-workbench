@@ -25,7 +25,7 @@ function mockFetch(items,{failAnalysis=0,analysisGate=null}={}){
   const calls=[];let failures=failAnalysis;
   const fetchImpl=async(url,options={})=>{
     calls.push({url:String(url),options});
-    if(String(url).startsWith('https://api.crossref.org/works'))return response({message:{items}});
+    if(String(url).startsWith('https://api.crossref.org/works'))return response({message:{items:typeof items==='function'?items(String(url)):items}});
     if(String(url).startsWith('https://api.openalex.org/works/'))return response({},404);
     if(String(url).startsWith('https://api.openalex.org/works'))return response({results:[]});
     if(String(url).endsWith('/models'))return response({data:[{id:'fixture-text'},{id:'fixture-text'},{id:'fixture-other'}]});
@@ -82,11 +82,21 @@ test('no abstract means no model analysis, real shortage, and progressive search
   assert.equal(job.drafts_analyzed,0);assert.equal(job.checkpoint.draft_shortfall,5);assert.equal(job.checkpoint.candidates[0].status,'no_fulltext');assert.equal(mock.calls.filter(x=>x.url.endsWith('/chat/completions')&&!JSON.parse(x.options.body).messages[0].content.includes('实质相关性筛选')).length,0);assert.equal(job.checkpoint.search_log.length,6);const searches=mock.calls.filter(x=>x.url.startsWith('https://api.crossref.org'));assert.match(searches[0].url,/from-pub-date/);assert.equal(new URL(searches.at(-1).url).searchParams.has('filter'),false);
 });
 
-test('repeated runs and another project reuse stored drafts without another paid analysis or another draft number',async()=>{
+test('unsupported report fields and absent research steps stay empty instead of generating placeholder findings',async()=>{
+  const mock=mockFetch([paper('10.1234/limited','A limited source fixture')]),fetchImpl=async(url,options={})=>{
+    if(String(url).endsWith('/chat/completions')&&JSON.parse(JSON.parse(options.body).messages[1].content).paper)return modelAnswer({summary:'Only the supplied observation can be summarized.'});
+    return mock.fetchImpl(url,options);
+  };
+  const {api,project}=await setup(fetchImpl);await settled(api,(await start(api,project)).id);const [record]=await api.handle(`/api/projects/${project.id}/papers`);
+  for(const key of ['scientific_question','equipment','samples','parameters','future_insights','transfer_conditions','roadmap'])assert.equal(record.analysis[key],'',key);
+  assert.deepEqual(record.analysis.flow_steps,[]);assert.equal(record.analysis.verified,false);assert.equal(record.analysis.source_basis,'abstract');
+});
+
+test('repeated runs and another project exclude stored studies without another paid analysis or a new association',async()=>{
   const mock=mockFetch([paper('10.1234/reuse','Reusable fixture')]);const {api,project,store}=await setup(mock.fetchImpl);await settled(api,(await start(api,project)).id);const paid=mock.calls.filter(x=>x.url.endsWith('/chat/completions')).length;
-  const second=await settled(api,(await start(api,project)).id);assert.equal(second.drafts_analyzed,0);assert.deepEqual(second.checkpoint.reused,['D001']);assert.equal(second.checkpoint.draft_shortfall,1);assert.equal(mock.calls.filter(x=>x.url.endsWith('/chat/completions')).length,paid);
+  const second=await settled(api,(await start(api,project)).id);assert.equal(second.drafts_analyzed,0);assert.deepEqual(second.checkpoint.reused,[]);assert.equal(second.checkpoint.draft_shortfall,1);assert.equal(second.checkpoint.candidates[0].status,'duplicate');assert.equal(second.checkpoint.candidates[0].paper_id,undefined);assert.equal(mock.calls.filter(x=>x.url.endsWith('/chat/completions')).length,paid);
   const other=await api.handle('/api/projects',{method:'POST',body:JSON.stringify({name:'Second topic'})});await api.handle(`/api/projects/${other.id}/scope`,{method:'PUT',body:JSON.stringify({research_question:'Related question',inferred:false})});
-  const third=await settled(api,(await start(api,other)).id);assert.deepEqual(third.checkpoint.reused,['D001']);assert.equal((await api.handle(`/api/projects/${other.id}/papers`))[0].id,'D001');assert.equal(store.snapshot().counter,1);assert.equal(mock.calls.filter(x=>x.url.endsWith('/chat/completions')).length,paid);
+  const third=await settled(api,(await start(api,other)).id);assert.deepEqual(third.checkpoint.reused,[]);assert.equal((await api.handle(`/api/projects/${other.id}/papers`)).length,0);assert.equal(store.snapshot().links.length,1);assert.equal(store.snapshot().counter,1);assert.equal(mock.calls.filter(x=>x.url.endsWith('/chat/completions')).length,paid);
 });
 
 test('failed analysis preserves pending candidate and resumes only unfinished work',async()=>{
@@ -158,10 +168,20 @@ test('candidate-only shortages and search reasons remain in every export even wh
   for(const kind of ['json','markdown','html']){const content=await (await api.handle(`/api/projects/${project.id}/export?kind=${kind}`)).text();assert.match(content,/Candidate without abstract/);assert.match(content,/补充摘要与开放全文|检索源未提供摘要/);assert.match(content,/Fixture research question/);if(kind==='json'){const bundle=JSON.parse(content);assert.equal(bundle.papers.length,0);assert.equal(bundle.jobs[0].checkpoint.draft_shortfall,1);assert.equal(bundle.jobs[0].checkpoint.search_log.length,6);}}
 });
 
-test('cross-project reuse shows a scope-transfer boundary in the reader and all exports without mutating the original analysis',async()=>{
-  const mock=mockFetch([paper('10.1234/transfer','Scope transfer fixture')]);const {api,project,store}=await setup(mock.fetchImpl);await settled(api,(await start(api,project)).id);
-  const second=await api.handle('/api/projects',{method:'POST',body:JSON.stringify({name:'Another research scope'})});await api.handle(`/api/projects/${second.id}/scope`,{method:'PUT',body:JSON.stringify({research_question:'A different research question',inferred:false})});await settled(api,(await start(api,second)).id);
-  const [transferred]=await api.handle(`/api/projects/${second.id}/papers`),[original]=await api.handle(`/api/projects/${project.id}/papers`);
-  assert.match(transferred.analysis.transfer_notice,/尚未重新评估当前研究范围/);assert.match(transferred.analysis.transfer_notice,/推断与行动需按当前课题核对/);assert.equal(original.analysis.transfer_notice,undefined);assert.equal(store.snapshot().papers[0].analysis.transfer_notice,undefined);assert.deepEqual(transferred.analysis.actions,original.analysis.actions);
-  for(const kind of ['json','markdown','html']){const content=await (await api.handle(`/api/projects/${second.id}/export?kind=${kind}`)).text();assert.match(content,/尚未重新评估当前研究范围/);}
+test('cross-project version matches are skipped and wider search fills the requested number with new studies',async()=>{
+  let nextBatch=false,searches=0;const old=paper('10.1234/original','Existing source study'),version={...paper('10.1234/formal','Different published title'),relation:{'is-preprint-of':[{id:'https://doi.org/10.1234/ORIGINAL'}]}},fresh=[paper('10.1234/new-a','New study A'),paper('10.1234/new-b','New study B')];
+  const mock=mockFetch(()=>!nextBatch?[old]:++searches===1?[version]:[version,...fresh]);const {api,project,store}=await setup(mock.fetchImpl);await settled(api,(await start(api,project)).id);nextBatch=true;
+  const second=await api.handle('/api/projects',{method:'POST',body:JSON.stringify({name:'Another research scope'})});await api.handle(`/api/projects/${second.id}/scope`,{method:'PUT',body:JSON.stringify({research_question:'A different research question',inferred:false})});let job=await settled(api,(await start(api,second,2)).id);
+  assert.equal(job.reports_generated,2);assert.deepEqual(job.checkpoint.reused,[]);assert.equal(job.checkpoint.candidates.find(item=>item.doi==='10.1234/formal').status,'duplicate');assert.equal(searches,2);
+  const records=await api.handle(`/api/projects/${second.id}/papers`);assert.deepEqual(records.map(item=>item.id),['D002','D003']);assert.equal(records.some(item=>item.doi==='10.1234/original'),false);assert.equal(store.snapshot().counter,3);
+  // A retry of this batch must keep its already generated records and IDs.
+  await api.handle(`/api/jobs/${job.id}/retry`,{method:'POST'});job=await settled(api,job.id);assert.equal(job.reports_generated,2);assert.equal(store.snapshot().counter,3);assert.deepEqual((await api.handle(`/api/projects/${second.id}/papers`)).map(item=>item.id),['D002','D003']);
+  const requests=mock.calls.filter(item=>item.url.endsWith('/chat/completions')).map(item=>JSON.parse(item.options.body));const ranked=requests.filter(item=>item.messages[0].content.includes('实质相关性筛选')).flatMap(item=>JSON.parse(item.messages[1].content).candidates);assert.equal(ranked.some(item=>item.title===version.title[0]),false);
+});
+
+test('a committed record with a stale pending checkpoint is recovered only for its original batch',async()=>{
+  const mock=mockFetch([paper('10.1234/checkpoint-recovery','Own batch recovery')]);const {api,project,store}=await setup(mock.fetchImpl);const first=await settled(api,(await start(api,project)).id),snapshot=store.snapshot();
+  const saved=snapshot.jobs.find(item=>item.id===first.id);saved.status='failed';saved.drafts_analyzed=0;saved.reports_generated=0;saved.checkpoint.drafts_analyzed=0;saved.checkpoint.reports_generated=0;saved.checkpoint.candidates[0].status='pending';delete saved.checkpoint.candidates[0].paper_id;
+  const restoredStore=memoryStore(snapshot),restored=createBrowserApi({store:restoredStore,fetchImpl:mock.fetchImpl});await restored.configure(config);const analysisCalls=()=>mock.calls.filter(item=>item.url.endsWith('/chat/completions')&&JSON.parse(JSON.parse(item.options.body).messages[1].content).paper).length,analyzed=analysisCalls();
+  await restored.handle(`/api/jobs/${first.id}/retry`,{method:'POST'});const result=await settled(restored,first.id);assert.equal(result.reports_generated,1);assert.equal(result.drafts_analyzed,1);assert.equal(restoredStore.snapshot().counter,1);assert.equal((await restored.handle(`/api/projects/${project.id}/papers`)).length,1);assert.equal(analysisCalls(),analyzed);
 });

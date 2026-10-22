@@ -97,7 +97,9 @@ def register(project_id, job_id, meta, analysis):
                 s.add(Paper(number=number, identity=identity(meta), metadata_json=json.dumps(meta, ensure_ascii=False), analysis_json=json.dumps(analysis, ensure_ascii=False)))
                 s.flush()
             link = s.scalar(select(ProjectPaper).where(ProjectPaper.project_id == project_id, ProjectPaper.paper_number == number))
-            if not link:
+            # A search batch registers new studies only. An existing identity
+            # must never silently add an older report to a different topic.
+            if not existing and not link:
                 s.add(ProjectPaper(id=str(uuid.uuid4()), project_id=project_id, paper_number=number, job_id=job_id, analysis_json=json.dumps(analysis, ensure_ascii=False)))
         return number, existing is None
     except Exception as error:
@@ -351,6 +353,27 @@ def project_records(project_id):
         return [dict(json.loads(s.get(Paper, link.paper_number).metadata_json), id=f'R{link.paper_number:03d}', analysis=json.loads(link.analysis_json)) for link in links]
 
 
+def registered_in_job(project_id, job_id, number, reused_ids=()):
+    """Recover only this batch's committed record after a checkpoint failure."""
+    if f'R{number:03d}' in reused_ids:
+        return False
+    with session() as s:
+        link = s.scalar(select(ProjectPaper).where(ProjectPaper.project_id == project_id, ProjectPaper.paper_number == number))
+        if not link or link.job_id != job_id:
+            return False
+        paper = s.get(Paper, number)
+        if not paper:
+            return False
+        # Older releases associated an existing report with a new topic and
+        # stamped that link with the new job ID. That is not a new registration.
+        for raw in (link.analysis_json, paper.analysis_json):
+            analysis = json.loads(raw)
+            origin = (analysis.get('project_context') or {}).get('project_id')
+            if analysis.get('transfer_notice') or (origin and origin != project_id):
+                return False
+        return True
+
+
 def _run_job(job_id, heartbeat=lambda: None, provider=None, skill=None):
     with session() as s:
         job = s.get(Job, job_id)
@@ -370,6 +393,24 @@ def _run_job(job_id, heartbeat=lambda: None, provider=None, skill=None):
         checkpoint(job_id, state, stage, 'running')
 
     try:
+        # Repair legacy counting checkpoints without deleting the old topic
+        # association or its notes. Keep these IDs out of the new-paper view.
+        with session() as s:
+            linked_numbers = list(s.scalars(select(ProjectPaper.paper_number).where(ProjectPaper.project_id == project_id, ProjectPaper.job_id == job_id)))
+        for number in linked_numbers:
+            paper_id = f'R{number:03d}'
+            if not registered_in_job(project_id, job_id, number, state['reused']) and paper_id not in state['reused']:
+                state['reused'].append(paper_id)
+        recoverable = []
+        for paper_id in state['completed']:
+            match = re.fullmatch(r'R(\d+)', str(paper_id))
+            if match and registered_in_job(project_id, job_id, int(match[1]), state['reused']) and paper_id not in recoverable:
+                recoverable.append(paper_id)
+        state['completed'] = recoverable
+        for candidate in state['candidates']:
+            if candidate.get('paper_id') in state['reused']:
+                candidate.update(status='duplicate', reason='已有分析，不计新增')
+                candidate.pop('paper_id', None)
         progress('接口预检')
         cfg = configuration() if provider is None else getattr(provider, 'config', {})
         provider, skill = provider or Provider(cfg), skill or Skill()
@@ -384,7 +425,18 @@ def _run_job(job_id, heartbeat=lambda: None, provider=None, skill=None):
                 progress('检索')
                 found, errors = search(query, start, cfg)
                 state['diagnostics'].extend(errors)
-                new = [p for p in found if not any(same_paper(p, x) for x in state['candidates'])]
+                new = []
+                known = ledger()
+                for paper in found:
+                    if any(same_paper(paper, x) for x in [*state['candidates'], *new]):
+                        continue
+                    old = next(((number, record) for number, record in known if same_paper(paper, record)), None)
+                    if old and not registered_in_job(project_id, job_id, old[0], state['reused']):
+                        # Keep the audit record, but do not spend model calls or
+                        # link another topic's report when seeking new studies.
+                        state['candidates'].append(dict(paper, status='duplicate', reason='已分析，不计新增'))
+                    else:
+                        new.append(paper)
                 ranked = rank_candidates(provider, scope, new)
                 state['candidates'].extend(dict(p, status='pending' if p['relevant'] else 'excluded') for p in ranked)
                 state.setdefault('search_windows', []).append(start)
@@ -398,14 +450,7 @@ def _run_job(job_id, heartbeat=lambda: None, provider=None, skill=None):
                 progress('去重')
                 old = next(((n, p) for n, p in ledger() if same_paper(candidate, p)), None)
                 if old:
-                    with session() as s:
-                        link = s.scalar(select(ProjectPaper).where(ProjectPaper.project_id == project_id, ProjectPaper.paper_number == old[0]))
-                        recovered = bool(link and link.job_id == job_id)
-                        if not link:
-                            p = s.get(Paper, old[0])
-                            # Existing evidence is reusable; project-specific advice requires its own analysis.
-                            s.add(ProjectPaper(id=str(uuid.uuid4()), project_id=project_id, paper_number=old[0], job_id=job_id, analysis_json=json.dumps(dict(json.loads(p.analysis_json), transfer_notice='复用既有分析；当前课题适用性尚待重新评估'), ensure_ascii=False)))
-                            state['reused'].append(f'R{old[0]:03d}')
+                    recovered = registered_in_job(project_id, job_id, old[0], state['reused'])
                     if recovered:
                         paper_id = f'R{old[0]:03d}'
                         candidate.update(status='completed', paper_id=paper_id, reason='恢复本批已登记论文')
@@ -439,9 +484,16 @@ def _run_job(job_id, heartbeat=lambda: None, provider=None, skill=None):
                     a = analyze(provider, skill, candidate, scope, folder, progress, project_id)
                     progress('校验')
                     number, new_record = register(project_id, job_id, candidate, a)
-                    candidate.update(status='completed' if new_record else 'duplicate', paper_id=f'R{number:03d}')
-                    if new_record:
-                        state['completed'].append(candidate['paper_id'])
+                    # Final transaction checks identity again. A concurrent
+                    # registration is excluded; a commit from this same batch
+                    # is recoverable and must be counted exactly once.
+                    recovered = not new_record and registered_in_job(project_id, job_id, number, state['reused'])
+                    if new_record or recovered:
+                        candidate.update(status='completed', paper_id=f'R{number:03d}')
+                        if candidate['paper_id'] not in state['completed']:
+                            state['completed'].append(candidate['paper_id'])
+                    else:
+                        candidate.update(status='duplicate', reason='已分析，不计新增')
                     checkpoint(job_id, state)
                 except Cancelled:
                     raise

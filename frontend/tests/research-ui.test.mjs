@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
-import {synthesisHtml} from '../research-view.js';
+import {synthesisHtml,hasReportContent} from '../research-view.js';
 import {paperIdsForBatch,activeStatuses} from '../results.js';
 const code=readFileSync(new URL('../app.js',import.meta.url),'utf8');
 function extract(start,end){const a=code.indexOf(start),b=code.indexOf(end,a);assert.ok(a>=0&&b>a);return code.slice(a,b);}
@@ -41,6 +41,6 @@ test('partial and insufficient syntheses retain actual comparisons and limitatio
 test('research brief counts new reports separately from reused and verified records',()=>{
   const job={id:'batch',requested:5,created_at:'2026-10-21T02:00:00Z',checkpoint:{reused:['D001'],completed:[],synthesis:{priority_actions:[]}}};
   const papers=[{id:'D001',batch_id:'old',title:'Reused source',analysis:{summary:'Existing',verified:false}},{id:'D002',batch_id:'batch',title:'New source',doi:'10.5555/test',analysis:{summary:'New actual report',verified:false,reading_list:['Methods'],verification_gaps:['No original figures']}}];
-  const context=vm.createContext({state:{project:{name:'Configured topic'},mode:'direct'},paperIdsForBatch,reportRecords:()=>papers,batchLabel:()=> 'B002',displayAnalysis:a=>({...a,reading_list:a.reading_list||[],verification_gaps:a.verification_gaps||[]})});
-  vm.runInContext(extract('function briefMarkdown(','function showResearchBrief('),context);const brief=context.briefMarkdown(job);assert.match(brief,/新增研究报告 1 篇/);assert.match(brief,/完成模型全文核验 0 篇/);assert.match(brief,/课题累计 2 篇/);assert.match(brief,/缺额 4 篇/);assert.match(brief,/10.5555\/test/);assert.match(brief,/No original figures/);assert.doesNotMatch(brief,/D001 · Reused source/);
+  const context=vm.createContext({state:{project:{name:'Configured topic'},mode:'direct'},hasReportContent,paperIdsForBatch,reportRecords:()=>papers,batchLabel:()=> 'B002',displayAnalysis:a=>({...a,reading_list:a.reading_list||[],verification_gaps:a.verification_gaps||[]})});
+  vm.runInContext(extract('function briefMarkdown(','function showResearchBrief('),context);const brief=context.briefMarkdown(job);assert.match(brief,/新增研究报告 1 篇/);assert.match(brief,/完成模型全文核验 0 篇/);assert.match(brief,/课题累计 2 篇/);assert.match(brief,/目标新增 5 篇；实际新增 1 篇/);assert.doesNotMatch(brief,/复用|缺额|研究启示：未记录/);assert.match(brief,/10.5555\/test/);assert.doesNotMatch(brief,/D001 · Reused source/);
 });

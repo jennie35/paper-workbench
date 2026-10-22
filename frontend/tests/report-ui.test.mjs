@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import {activeStatuses,needsEvidence,summarizeBatch,paperIdsForBatch} from '../results.js';
+import {hasReportContent} from '../research-view.js';
 const code=readFileSync(new URL('../app.js',import.meta.url),'utf8');
 const extract=(start,end)=>{const a=code.indexOf(start),b=code.indexOf(end,a);assert.ok(a>=0&&b>a);return code.slice(a,b);};
 const el=()=>({value:'',dataset:{},hidden:false,classList:{toggle(){}},setAttribute(){},removeAttribute(){},querySelectorAll:()=>[],querySelector:()=>null,addEventListener(){}});
@@ -42,6 +43,34 @@ test('unverified saved reports render in the main report list even with zero ver
   vm.runInContext(extract('function displayAnalysis(','function batchReportCounts('),context);
   vm.runInContext(extract('function renderPapers(){','function clearFilters('),context);context.renderPapers();
   assert.match($('cards').innerHTML,/Readable report/);assert.doesNotMatch($('cards').innerHTML,/尚无完成全部核验/);assert.match($('resultCount').textContent,/1 篇文献报告/);
+});
+
+test('cards expose saved content and topic relevance without fabricated empty fields',()=>{
+  const esc=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+  const state={mode:'direct',demo:false,view:'latest',jobs:[]};
+  const context=vm.createContext({state,esc,hasReportContent,tags:()=>[],badge:esc,reportLabel:()=> '摘要研究报告'});
+  vm.runInContext(extract('function displayAnalysis(','function batchReportCounts('),context);
+  vm.runInContext(extract('function paperCard(','function section('),context);
+  const paper={id:'D001',title:'Saved paper',analysis:{summary:'Actual finding <script>unsafe()</script>',future_insights:'Change the topic measurement protocol.',research_logic:{transfer_insights:{judgement_change:'证据不足时保留原判断'}}}};
+  const before=JSON.stringify(paper),html=context.paperCard(paper);
+  assert.match(html,/Actual finding &lt;script&gt;/);assert.match(html,/Change the topic measurement protocol/);
+  assert.match(html,/data-open-paper="D001"/);assert.match(html,/查看详细分析/);
+  assert.doesNotMatch(html,/<script>|年份待确认|发表信息待确认|批次未记录|>已完成模型核验</);
+  assert.doesNotMatch(html,/证据不足时保留原判断/);
+  assert.equal(JSON.stringify(paper),before);
+  paper.analysis.future_insights='未报告';
+  paper.analysis.research_logic={};
+  assert.doesNotMatch(context.paperCard(paper),/card-relevance|课题相关总结/);
+});
+
+test('batch summary reports target and actual new count without reuse or shortfall counters',()=>{
+  const job={id:'batch',requested:5,status:'completed',checkpoint:{reused:['old'],completed:[]}},fields=new Map();
+  const $=id=>{if(!fields.has(id))fields.set(id,el());return fields.get(id);};
+  const context=vm.createContext({state:{demo:false},$,selectedBatch:()=>job,summarizeBatch,batchReportCounts:()=>({generated:2,reused:1}),batchLabel:()=> 'B001',dateLabel:()=> '10-22',esc:String,badge:String,bindResultActions(){}});
+  vm.runInContext(extract('function renderBatchSummary(){','function directDraftCount('),context);context.renderBatchSummary();
+  const html=$('batchSummary').innerHTML;
+  assert.match(html,/目标新增 5 篇/);assert.match(html,/已生成 2 篇新文献报告/);
+  assert.doesNotMatch(html,/复用|缺额|本批新增 5 篇/);assert.match(html,/data-retry="batch"/);
 });
 
 test('opening project deletion confirmation does not delete anything and blocks active analysis',()=>{

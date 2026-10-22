@@ -136,6 +136,47 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual((Path(registered["path"]) / "evidence.json").read_bytes(), evidence_bytes)
         self.assertEqual(workspace.check(self.root)["complete_readings"], 0)
 
+    def test_cards_use_saved_topic_insight_and_dialog_detail_without_inventing_missing_fields(self):
+        draft = self.draft()
+        evidence = {"summary": "Saved finding", "future_insights": "Saved relevance <script>unsafe()</script>", "actions": [{"title": "A pilot comparison", "method": "Compare the saved protocols", "resources": "未报告", "controls": "", "priority": "P1"}]}
+        saved = workspace.json_bytes(evidence)
+        (draft / "evidence.json").write_bytes(saved)
+        note = "# Reading\n\n## Summary\nSaved report detail.\n\n## Equipment\n设备：未报告\n\n## Limits\nAn abstract cannot establish independent validation.\n"
+        (draft / "reading-note.md").write_text(note, encoding="utf-8")
+        result = workspace.register(self.root, draft)
+        page = (self.root / "index.html").read_text(encoding="utf-8")
+        card = page.split('<article ', 1)[1].split('</article>', 1)[0]
+        self.assertIn("Saved finding", card)
+        self.assertIn("Saved relevance &lt;script&gt;unsafe()&lt;/script&gt;", card)
+        self.assertNotIn("Saved report detail", card)
+        self.assertIn('data-open="reading-R001" aria-haspopup="dialog" aria-controls="reading-R001"', card)
+        self.assertIn('<dialog class="reader-dialog" id="reading-R001" aria-labelledby="title-R001"', page)
+        self.assertIn("dialog.showModal()", page)
+        self.assertIn('data-close="reading-R001" autofocus', page)
+        self.assertIn("Saved report detail", page)
+        self.assertIn("An abstract cannot establish independent validation.", page)
+        self.assertNotIn("设备：未报告", page)
+        self.assertNotIn('<dt>资源</dt>', page)
+        self.assertNotIn("未指定优先级", page)
+        self.assertNotIn("原文链接未提供", page)
+        self.assertEqual((Path(result['path']) / 'evidence.json').read_bytes(), saved)
+        self.assertEqual((Path(result['path']) / 'reading-note.md').read_text(encoding='utf-8'), note)
+
+    def test_note_insight_excerpt_is_available_when_structured_insight_is_absent(self):
+        draft = self.draft()
+        (draft / 'reading-note.md').write_text('## 2. 论文总结\nA saved concise result.\n\n## 10. 未来研究启示\nA saved, testable implication.\n\n## 11. 下一步\nA separate plan.', encoding='utf-8')
+        workspace.register(self.root, draft)
+        page = (self.root / 'index.html').read_text(encoding='utf-8')
+        card = page.split('<article ', 1)[1].split('</article>', 1)[0]
+        self.assertIn('A saved concise result.', card)
+        self.assertIn('A saved, testable implication.', card)
+        self.assertNotIn('A separate plan.', card)
+
+    def test_empty_placeholders_do_not_create_report_sections_or_action_rows(self):
+        self.assertEqual(workspace.render_action({"title": "未提供", "method": "未报告"}), "")
+        self.assertEqual(workspace.display_text(["", "未报告", "A saved observation"]), "A saved observation")
+        self.assertEqual(workspace.available_note("## Empty\n未报告\n\n## Actual\nA valid finding.\n"), "## Actual\nA valid finding.")
+
     def test_lock_prevents_concurrent_mutation(self):
         draft = self.draft()
         before = (self.root / "ledger.json").read_bytes()
@@ -232,7 +273,7 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual((self.root / "index.html").read_bytes(), page)
         self.assertEqual((self.root / "ledger.json").read_bytes(), ledger)
 
-    def test_saved_synthesis_brief_and_search_log_are_shown_without_execution(self):
+    def test_saved_batch_files_are_linked_without_inline_repetition_or_execution(self):
         run = self.root / "runs" / "2026-10-21-batch-a"
         run.mkdir(parents=True)
         (run / "synthesis.md").write_text("# Synthetic synthesis\nSources disagree about units. <script>unsafe()</script>", encoding="utf-8")
@@ -242,11 +283,13 @@ class WorkspaceTests(unittest.TestCase):
         (run / "untrusted.py").write_text("raise RuntimeError('Do not execute research materials')", encoding="utf-8")
         workspace.build(self.root)
         page = (self.root / "index.html").read_text(encoding="utf-8")
-        self.assertIn("Sources disagree about units.", page)
-        self.assertIn("&lt;script&gt;unsafe()&lt;/script&gt;", page)
+        self.assertNotIn("Sources disagree about units.", page)
         self.assertNotIn("<script>unsafe()", page)
-        self.assertIn("Actual new: 0; shortage: 5.", page)
+        self.assertNotIn("Actual new: 0; shortage: 5.", page)
+        self.assertIn('href="runs/2026-10-21-batch-a/synthesis.md"', page)
+        self.assertIn('href="runs/2026-10-21-batch-a/brief.md"', page)
         self.assertIn('href="runs/2026-10-21-batch-a/search-log.json"', page)
+        self.assertEqual((run / 'brief.md').read_text(encoding='utf-8'), "Actual new: 0; shortage: 5. No real papers searched.")
         self.assertNotIn("untrusted.py", page)
         self.assertFalse(flag.exists())
         self.assertEqual(workspace.check(self.root)["records"], 0)
