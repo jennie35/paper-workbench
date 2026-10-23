@@ -1,4 +1,4 @@
-import {selectVisualPages,imageSha256,sourceImageBytes} from './paper-visuals.js?v=20261023-core1';
+import {selectVisualPages,imageSha256,sourceImageBytes} from './paper-visuals.js?v=20261023-search2';
 // References default to text only. Explicit paper analysis may capture bounded
 // source page images; rendering never marks those pages visually inspected.
 const MAX_BYTES = 50 * 1024 * 1024;

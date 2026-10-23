@@ -34,6 +34,17 @@ class Project(Base):
     created_at: Mapped[str] = mapped_column(String(40), default=now)
 
 
+class ProjectSchedule(Base):
+    __tablename__ = 'project_schedules'
+    project_id: Mapped[str] = mapped_column(ForeignKey('projects.id'), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    config_json: Mapped[str] = mapped_column(Text, default='{}')
+    next_run_at: Mapped[str] = mapped_column(String(40), default='')
+    last_run_at: Mapped[str] = mapped_column(String(40), default='')
+    last_job_id: Mapped[str] = mapped_column(String(36), default='')
+    last_error: Mapped[str] = mapped_column(Text, default='')
+
+
 class Reference(Base):
     __tablename__ = 'references'
     id: Mapped[str] = mapped_column(String(36), primary_key=True)

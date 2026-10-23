@@ -9,7 +9,16 @@ test('Markdown, evidence and HTML retain saved content and source boundaries wit
   const note=recordMarkdown(paper),evidence=recordEvidence(paper),md=exportResearchMarkdown(bundle),html=exportOfflineHtml(bundle);
   for(const item of [note,md,html]){assert.match(item,/Saved source summary/);assert.match(item,/Actual text only/);assert.match(item,/Known resources only/);assert.match(item,/Stop if source is unavailable/);assert.match(item,/11\. 下一步研究规划/);assert.doesNotMatch(item,/5\. 重建研究设计|6\. 关键设计决策|7\. 原图、表格与公式核验|未报告或未核验/);}
   assert.deepEqual(evidence.actions,paper.analysis.actions);assert.equal(evidence.verified,false);assert.equal(evidence.skill_applied,false);assert.deepEqual(evidence.source_blocks,paper.analysis.source_blocks);
-  for(const item of [md,html]){assert.match(item,/Reference text actually supplied/);assert.match(item,/synthetic-fingerprint/);assert.match(item,/Synthetic query/);assert.match(item,/Source-limited analysis/);assert.match(item,/One paper cannot establish/);}
+  for(const item of [md,html]){assert.match(item,/Reference text actually supplied/);assert.match(item,/synthetic-fingerprint/);}
+  assert.match(md,/Synthetic query/);assert.match(md,/Source-limited analysis/);assert.match(md,/One paper cannot establish/);
+});
+
+test('offline batch tags omit retrieval and synthesis dumps while JSON and Markdown preserve them',()=>{
+  const saved=structuredClone(bundle);saved.jobs.push({id:'empty-batch',requested:5,checkpoint:{candidates:[{title:'CANDIDATE_ONLY'}],search_log:[{query:'SEARCH_ONLY'}],synthesis:{status:'pending'},synthesis_history:[{reason:'HISTORY_ONLY'}]}});
+  saved.jobs.push({id:'revision-only',requested:0,checkpoint:{completed:['D001']}});
+  const original=JSON.stringify(saved),html=exportOfflineHtml(saved),md=exportResearchMarkdown(saved);
+  assert.equal((html.match(/class="batch-tag"/g)||[]).length,1);assert.match(html,/目标新增 5 篇 · 已新增 1 篇/);assert.doesNotMatch(html,/empty-batch|revision-only|CANDIDATE_ONLY|SEARCH_ONLY|HISTORY_ONLY|Synthetic query|Source-limited analysis|跨论文综合|检索来源与筛选记录/);
+  for(const value of ['CANDIDATE_ONLY','SEARCH_ONLY','HISTORY_ONLY']){assert.ok(md.includes(value));assert.ok(original.includes(value));}assert.equal(JSON.stringify(saved),original);
 });
 
 test('offline report cards expose saved summary and topic relevance before opening details',()=>{

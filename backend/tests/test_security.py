@@ -20,6 +20,32 @@ def test_dns_rebinding_rejected():
             safe_request('GET','https://example.com/test')
 
 
+@pytest.mark.parametrize('kind', ['model', 'pdf', 'landing'])
+def test_uppercase_https_still_uses_validated_ip(monkeypatch, tmp_path, kind):
+    import httpx
+    from app.security import download
+    from app.acquisition import read_landing_page
+    addresses = [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('8.8.8.8', 443))]
+    monkeypatch.setattr(socket, 'getaddrinfo', lambda *_a, **_k: addresses)
+    original_client = httpx.Client
+    visited = []
+    def respond(request):
+        visited.append(request.url.host)
+        assert request.url.host == '8.8.8.8'
+        assert request.headers['Host'] == 'example.com'
+        return httpx.Response(200, content=b'%PDF-test' if kind == 'pdf' else b'<html></html>',
+                              headers={'content-type': 'application/pdf' if kind == 'pdf' else 'text/html'})
+    monkeypatch.setattr('app.security.httpx.Client', lambda **kwargs: original_client(transport=httpx.MockTransport(respond), **kwargs))
+    url = 'HTTPS://example.com/article?source=public'
+    if kind == 'model':
+        safe_request('GET', url)
+    elif kind == 'pdf':
+        download(url, tmp_path / 'source.pdf')
+    else:
+        read_landing_page(url)
+    assert visited == ['8.8.8.8']
+
+
 @pytest.mark.parametrize('host,uses_proxy', [('api.openai.com', True), ('example.com', False), ('api.openai.com.example.com', False)])
 def test_official_proxy_is_allowlisted_and_other_endpoints_stay_pinned(monkeypatch, host, uses_proxy):
     monkeypatch.setenv('OPENAI_HTTP_PROXY', 'http://127.0.0.1:7890')

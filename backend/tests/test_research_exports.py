@@ -5,7 +5,7 @@ import zipfile
 
 from app.config import DATA
 from app.db import Job, Reference, session
-from app.exporting import clean_export, offline_index
+from app.exporting import clean_export, offline_index, project_markdown
 from app.pipeline import candidate_folder
 from fixtures import analysis, metadata
 
@@ -67,7 +67,8 @@ def test_markdown_and_offline_exports_retain_empty_batch_evidence(logged):
                 page = z.read('index.html').decode()
                 assert 'data-tab="recent"' in page and 'data-tab="actions"' in page
                 assert 'data-filter' in page and 'candidate_records' not in page
-                assert 'Original figure unavailable' in page and 'No completed evidence' in page
+                assert 'Original figure unavailable' not in page and 'No completed evidence' not in page
+                assert '保存的批次与跨论文综合' not in page
                 assert '<script>inert()</script>' not in page
                 assert '&lt;script&gt;inert()&lt;/script&gt;' in page
                 assert 'fetch(' not in page and 'type="module"' not in page
@@ -75,6 +76,25 @@ def test_markdown_and_offline_exports_retain_empty_batch_evidence(logged):
 
 def test_export_endpoint_still_requires_login(client):
     assert client.get('/api/projects/anything/export?kind=json').status_code == 401
+
+
+def test_offline_batch_tags_preserve_archives_without_visible_candidate_dumps():
+    paper = dict(metadata(), id='R001', analysis=analysis(), batch_id='saved-job')
+    bundle = {'project': {'name': 'Example'}, 'papers': [paper], 'jobs': [
+        {'id': 'saved-job', 'requested': 5, 'checkpoint': {'completed': ['R001'],
+            'candidates': [{'title': 'CANDIDATE_ONLY'}], 'search_log': [{'query': 'SEARCH_ONLY'}],
+            'synthesis': {'status': 'pending'}, 'synthesis_history': [{'reason': 'HISTORY_ONLY'}]}},
+        {'id': 'empty-batch', 'requested': 5, 'checkpoint': {'candidates': [{'title': 'EMPTY_ONLY'}]}},
+        {'id': 'revision-only', 'requested': 0, 'checkpoint': {'completed': ['R001']}},
+    ]}
+    original = json.dumps(bundle, ensure_ascii=False)
+    page, markdown = offline_index(bundle), project_markdown(bundle)
+    assert page.count('class="batch-tag"') == 1
+    assert '目标新增 5 篇 · 已新增 1 篇' in page
+    for value in ('CANDIDATE_ONLY', 'SEARCH_ONLY', 'HISTORY_ONLY', 'EMPTY_ONLY'):
+        assert value not in page and value in markdown and value in original
+    assert 'empty-batch' not in page and 'revision-only' not in page and '跨论文综合' not in page
+    assert json.dumps(bundle, ensure_ascii=False) == original
 
 
 def test_export_sanitization_and_local_filter_fields():

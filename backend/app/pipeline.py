@@ -14,7 +14,7 @@ from sqlalchemy import select
 from .artifacts import inspect_pdf, challenge_image, write_artifacts, write_record_index
 from .config import DATA
 from .db import session, Project, Job, Paper, ProjectPaper, Setting, now
-from .discovery import search, same_paper, identity, title_key
+from .discovery import search, same_paper, identity, title_key, merge_metadata
 from .provider import Provider
 from .schemas import Analysis
 from .skill import Skill
@@ -23,6 +23,7 @@ from .research import RESEARCH_RULES, check_research_logic, stamp_reading_scope,
 from .visual_review import checked_visual_records, inspection_receipt, stamp_visual_evidence
 from .reading_core import CORE_RULES, validate_core_report, completion_status
 from .acquisition import acquire_pdf
+from .search_planning import SEARCH_VERSION, plan_queries, search_scope, search_diagnosis, metadata_pool
 
 
 class Cancelled(Exception):
@@ -190,23 +191,48 @@ def register_revision(project_id, number, meta, analysis):
 def rank_candidates(provider, scope, candidates):
     if not candidates:
         return []
-    scope = model_scope(scope)
-    prompt = '根据课题范围评估题录相关性，不能把年份或期刊当成相关性。只保留直接相关的论文。relevance 从1到3，3为直接回答核心科学问题，2为关键方法，1为背景。返回 {"ranked":[{"index":0,"relevant":true,"relevance":3,"reason":"具体关联"}]}。\n范围：' + json.dumps(scope, ensure_ascii=False) + '\n题录：' + json.dumps([{'index': i, 'title': p['title'], 'abstract':p.get('abstract',''), 'journal': p['journal']} for i, p in enumerate(candidates)], ensure_ascii=False)
-    scored = provider.json(prompt)
+    scope = search_scope(scope, scope.get('topic_name', ''))
     selected = []
-    seen = set()
-    for row in scored.get('ranked', []):
-        i = row.get('index')
-        if type(i) is int and 0 <= i < len(candidates) and i not in seen:
-            seen.add(i)
-            score = row.get('relevance', 2)
-            p = dict(candidates[i], relevance_reason=str(row.get('reason', '')), relevance=score if type(score) is int and 1 <= score <= 3 else 1, relevant=row.get('relevant') is True)
-            selected.append(p)
-    for i, candidate in enumerate(candidates):
-        if i not in seen:
-            selected.append(dict(candidate, relevant=False, relevance=0, relevance_reason='模型未提供明确的相关性判断，不纳入精读'))
+    for offset in range(0, len(candidates), 25):
+        batch = candidates[offset:offset + 25]
+        prompt = '''根据课题范围评估题录相关性。只根据实际来源提供的标题、摘要与题录判断，不能生成或引用未提供的论文。
+优先核心科学问题与纳入范围，遵守排除范围。设备、预算与资源不是强制检索条件，空白项不影响相关性判断。
+relevance从1到3：3直接回答核心问题，2提供可迁移的关键方法，1仅背景。仅3或2可relevant=true。
+摘要未提供时可根据具体题名暂选取得正文再确认，说明依据有限，不能补写摘要或根据中文/无DOI排除。
+逐条返回每个index，reason说明具体对象/方法/问题关联。返回 {"ranked":[{"index":0,"relevant":true,"relevance":3,"reason":"具体关联"}]}。
+范围：''' + json.dumps(scope, ensure_ascii=False) + '\n题录：' + json.dumps([{'index': i, 'title': p['title'], 'abstract': str(p.get('abstract') or '')[:2800], 'journal': p.get('journal', ''), 'year': p.get('year'), 'source': p.get('source')} for i, p in enumerate(batch)], ensure_ascii=False)
+        scored = provider.json(prompt)
+        if not isinstance(scored.get('ranked'), list):
+            raise ValueError('模型未返回有效的题录相关性列表；请检查文本模型的JSON能力后重试')
+        seen = set()
+        for row in scored.get('ranked', []):
+            if not isinstance(row, dict):
+                continue
+            i = row.get('index')
+            if type(i) is int and 0 <= i < len(batch) and i not in seen:
+                seen.add(i)
+                score = row.get('relevance', 2)
+                score = score if type(score) is int and 1 <= score <= 3 else 1
+                p = dict(batch[i], relevance_reason=str(row.get('reason', ''))[:1000], relevance=score,
+                         relevant=row.get('relevant') is True and score >= 2,
+                         relevance_evaluated_version=SEARCH_VERSION)
+                selected.append(p)
+        for i, candidate in enumerate(batch):
+            if i not in seen:
+                selected.append(dict(candidate, relevant=False, relevance=0, relevance_evaluated_version=SEARCH_VERSION,
+                                     relevance_reason='模型未提供明确的相关性判断，不纳入精读'))
     # Model ranks substantive relevance; publication/date only break ties within included set.
-    return sorted(selected, key=lambda p: (not p['relevant'], -p['relevance'], p['publication_status'] != 'published', -(p.get('year') or 0)))
+    return sorted(selected, key=candidate_priority)
+
+
+def candidate_priority(paper):
+    try:
+        year = int(paper.get('year') or 0)
+    except (ValueError, TypeError):
+        year = 0
+    return (not paper.get('relevant'), -paper.get('relevance', 0),
+            not bool(paper.get('pdf_urls') or (paper.get('content_urls') or {}).get('pdf')),
+            paper.get('publication_status') != 'published', -year)
 
 
 def validate_analysis(a, source_map, pages):
@@ -264,9 +290,11 @@ def analyze(provider, skill, meta, scope, folder, progress, project_id=None):
     skill_fields = {'reading_skill': 'norman-paper-reading' if skill_used else 'paper-workbench',
                     'skill_applied': skill_used, 'reading_mode': 'extend'}
     # Check identity against PDF first page and opening text, not metadata alone.
-    check = provider.json('核对下载正文是否为指定论文，标题、作者和版本是否匹配。不能只根据给定题录回答。返回 {"matches":true,"reason":"理由","version":"正文版本"}。题录：'+json.dumps(meta, ensure_ascii=False)+'\n正文开头：'+ '\n'.join(texts[:2])[:20000])
+    check = provider.json('核对下载正文是否为指定论文，标题、作者和版本是否匹配。再根据实际正文确认其研究对象、方法是否与课题核心问题或可迁移方法有关，不要求同一设备或资源。不能只根据给定题录回答。返回 {"matches":true,"scope_matches":true,"reason":"理由","version":"正文版本"}。课题：'+json.dumps(search_scope(scope), ensure_ascii=False)+'\n题录：'+json.dumps(meta, ensure_ascii=False)+'\n正文开头：'+ '\n'.join(texts[:2])[:20000])
     if check.get('matches') is not True:
         raise ValueError('全文身份与题录不匹配：' + str(check.get('reason', ''))[:300])
+    if check.get('scope_matches') is False:
+        raise ValueError('全文与课题核心问题不匹配：' + str(check.get('reason', ''))[:300])
     chunk_file = folder / 'text-checkpoints.json'
     chunks = json.loads(chunk_file.read_text('utf-8')) if chunk_file.exists() else []
     groups, current, length = [], [], 0
@@ -623,46 +651,33 @@ def _run_job(job_id, heartbeat=lambda: None, provider=None, skill=None):
         # Imported studies have an explicit, separate analysis task. They must
         # not silently fulfil a batch whose goal is newly discovered studies.
         imported = imported_candidates(project_id)
-        query = ' '.join(scope.get('keywords', [])) or scope.get('research_question') or project.name
-        queries = list(dict.fromkeys(filter(None, [' '.join(scope.get('keywords_zh', [])),
-                                                     ' '.join(scope.get('keywords_en', []))]))) or [query]
-        year = dt.date.today().year
-        for start in [year-1, year-4, 1900]:
-            if len(state['completed']) >= requested:
-                break
-            if start not in state.get('search_windows', []):
-                progress('检索')
-                found = []
-                for current_query in queries:
-                    progress('检索')
-                    results, errors = search(current_query, start, cfg)
-                    state['diagnostics'].extend(errors)
-                    found.extend(results)
-                    state.setdefault('search_log', []).append({'query': current_query, 'from_year': start,
-                                                              'retrieved_at': now(), 'found': len(results)})
-                new = []
-                known = ledger()
-                for paper in found:
-                    if any(same_paper(paper, x) for x in [*state['candidates'], *new]):
-                        continue
-                    if any(same_paper(paper, item) for item in imported):
-                        state['candidates'].append(dict(paper, status='duplicate', reason='已有导入题录；请在题录区分析，不计本批检索新增'))
-                        continue
-                    old = next(((number, record) for number, record in known if same_paper(paper, record)), None)
-                    if old and not registered_in_job(project_id, job_id, old[0], state['reused']):
-                        # Keep the audit record, but do not spend model calls or
-                        # link another topic's report when seeking new studies.
-                        state['candidates'].append(dict(paper, status='duplicate', reason='已分析，不计新增'))
-                    else:
-                        new.append(paper)
-                ranked = rank_candidates(provider, scope, new)
-                state['candidates'].extend(dict(p, status='pending' if p['relevant'] else 'excluded') for p in ranked)
-                state.setdefault('search_windows', []).append(start)
-                checkpoint(job_id, state)
-            for candidate in state['candidates']:
+        if state.get('discovery_strategy_version') != SEARCH_VERSION:
+            # Keep legacy audit data without letting a previous giant query and
+            # exhausted year windows prevent the improved discovery strategy.
+            if state.get('search_windows'):
+                for item in state['candidates']:
+                    committed = next(((n, row) for n, row in ledger() if same_paper(item, row)), None)
+                    recoverable_item = committed and registered_in_job(project_id, job_id, committed[0], state['reused'])
+                    if item.get('status') in ('pending', 'no_fulltext', 'excluded', 'unverified') and not recoverable_item and not (candidate_folder(item, scope) / 'paper.pdf').is_file():
+                        item['previous_discovery_status'] = item['status']
+                        item['status'] = 'discovery_cached'
+            state['discovery_strategy_version'] = SEARCH_VERSION
+            state['search_steps'] = []
+            state.pop('search_plan', None)
+        if not state.get('search_plan'):
+            progress('检索')
+            state['search_plan'] = plan_queries(provider, scope, project.name)
+            checkpoint(job_id, state)
+        queries = [x['query'] for x in state['search_plan'].get('queries', []) if x.get('query')]
+        attempts, attempt_limit = 0, min(60, max(12, requested * 6))
+        def process_pending():
+            nonlocal attempts
+            start_attempts = attempts
+            per_query_limit = max(3, (requested - len(state['completed'])) * 3)
+            for candidate in sorted(state['candidates'], key=candidate_priority):
                 if len(state['completed']) >= requested:
                     break
-                if candidate['status'] in ('completed', 'excluded', 'duplicate', 'reused', 'no_fulltext', 'unverified'):
+                if candidate['status'] in ('completed', 'excluded', 'duplicate', 'reused', 'no_fulltext', 'unverified', 'discovery_cached'):
                     continue
                 progress('去重')
                 old = next(((n, p) for n, p in ledger() if same_paper(candidate, p)), None)
@@ -677,6 +692,9 @@ def _run_job(job_id, heartbeat=lambda: None, provider=None, skill=None):
                         candidate.update(status='duplicate', reason='已分析，不计新增')
                     checkpoint(job_id, state)
                     continue
+                if attempts >= attempt_limit or attempts - start_attempts >= per_query_limit:
+                    return
+                attempts += 1
                 folder = candidate_folder(candidate, scope)
                 folder.mkdir(parents=True, exist_ok=True)
                 try:
@@ -713,17 +731,71 @@ def _run_job(job_id, heartbeat=lambda: None, provider=None, skill=None):
                     raise
                 except Exception as e:
                     # Retain draft and partial visual artifacts; never count as a completed paper.
-                    candidate.update(status='unverified', reason=safe_error(e))
+                    candidate.update(status='excluded' if isinstance(e, ValueError) and str(e).startswith('全文与课题核心问题不匹配') else 'unverified', reason=safe_error(e))
                     checkpoint(job_id, state)
+
+        # Resume available uploaded files/committed records before searching.
+        process_pending()
+        year = dt.date.today().year
+        for start in [year - 1, year - 4, 1900]:
+            for current_query in queries:
+                if len(state['completed']) >= requested or attempts >= attempt_limit:
+                    break
+                step = {'query': current_query, 'from_year': start}
+                if step in state.get('search_steps', []):
+                    continue
+                progress('检索')
+                found, errors = search(current_query, start, cfg)
+                state['diagnostics'] = list(dict.fromkeys([*state['diagnostics'], *errors]))
+                state.setdefault('search_log', []).append({**step, 'retrieved_at': now(), 'found': len(found)})
+                new, known = [], ledger()
+                for paper in found:
+                    match = next((row for row in state['candidates'] if same_paper(paper, row)), None)
+                    if match:
+                        old_clues = (match.get('abstract'), set(match.get('pdf_urls') or []), dict(match.get('content_urls') or {}))
+                        merge_metadata(match, paper)
+                        new_clues = (match.get('abstract'), set(match.get('pdf_urls') or []), dict(match.get('content_urls') or {}))
+                        if match.get('status') == 'discovery_cached' or (old_clues != new_clues and match.get('status') in ('excluded', 'no_fulltext')):
+                            new.append(match)
+                        continue
+                    if any(same_paper(paper, item) for item in new):
+                        continue
+                    if any(same_paper(paper, item) for item in imported):
+                        state['candidates'].append(dict(paper, status='duplicate', reason='已有导入题录；请在题录区分析，不计本批检索新增'))
+                        continue
+                    old = next(((number, record) for number, record in known if same_paper(paper, record)), None)
+                    if old and not registered_in_job(project_id, job_id, old[0], state['reused']):
+                        state['candidates'].append(dict(paper, status='duplicate', reason='已分析，不计新增'))
+                    else:
+                        new.append(paper)
+                # Small model calls over real records avoid truncation and
+                # omitted-index rejection from sending hundreds at once.
+                # Metadata providers can return weak tail matches. Inspect a
+                # bounded, source-rich pool per query before expanding terms.
+                new = metadata_pool(new, max(25, min(60, requested * 6)))
+                for paper in rank_candidates(provider, dict(scope, topic_name=project.name), new):
+                    match = next((row for row in state['candidates'] if same_paper(paper, row)), None)
+                    if match:
+                        match.update(paper, status='pending' if paper['relevant'] else 'excluded')
+                    else:
+                        state['candidates'].append(dict(paper, status='pending' if paper['relevant'] else 'excluded'))
+                state.setdefault('search_steps', []).append(step)
+                if start not in state.setdefault('search_windows', []):
+                    state['search_windows'].append(start)
+                state['search_diagnosis'] = search_diagnosis(state, requested)
+                checkpoint(job_id, state)
+                # Stop at the requested number of actual core reports; unused
+                # metadata never turns into an extra report in this batch.
+                process_pending()
+            if len(state['completed']) >= requested or attempts >= attempt_limit:
+                break
+        state['search_diagnosis'] = search_diagnosis(state, requested)
+        state['search_diagnosis']['acquisition_budget_exhausted'] = attempts >= attempt_limit
         state['actual'] = len(state['completed'])
         state['shortfall'] = max(0, requested - state['actual'])
         state['pending_verification'] = sum(x['status'] == 'unverified' for x in state['candidates'])
-        progress('跨论文综合')
-        try:
-            state['synthesis'] = build_synthesis(provider, scope, project_records(project_id))
-        except Exception as exc:
-            # Model synthesis failure cannot erase completed, validated papers.
-            state['synthesis'] = {'schema_version': 1, 'status': 'failed', 'created_at': now(), 'record_ids': [], 'priority_actions': [], 'limitations': [safe_error(exc), '已完成论文保留；可单独重试跨论文综合。']}
+        # Cross-paper synthesis is explicitly requested through its own API.
+        # A per-paper search batch does not incur an unused extra model call.
         state['reports_completed'] = len(state['completed'])
         state['text_reports_completed'] = len(state['completed'])
         if state['actual'] < requested:

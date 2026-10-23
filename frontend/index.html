@@ -6,12 +6,12 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https: http://localhost:* http://127.0.0.1:*; img-src 'self' blob: data:; style-src 'self'; script-src 'self'; worker-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="description" content="从研究问题到可检验行动。按课题检索、精读并积累可追溯的论文证据。">
   <title>研序 Paper Workbench · 学术文献研究看板</title>
-  <link rel="stylesheet" href="./styles.css?v=20261023-core1">
+  <link rel="stylesheet" href="./styles.css?v=20261023-search2">
   <link rel="stylesheet" href="./vendor/Temml-Local.css">
-  <link rel="stylesheet" href="./editorial.css?v=20261023-core1">
+  <link rel="stylesheet" href="./editorial.css?v=20261023-search2">
   <script defer src="./vendor/temml.min.js"></script>
-  <script type="module" src="./app.js?v=20261023-core1"></script>
-  <link rel="stylesheet" href="research-graph.css?v=20261023-core1">
+  <script type="module" src="./app.js?v=20261023-search2"></script>
+  <link rel="stylesheet" href="research-graph.css?v=20261023-search2">
 </head>
 <body>
   <a class="skip-link" href="#main">跳至主要内容</a>
@@ -48,16 +48,16 @@
       <section class="stats" id="stats" aria-label="研究统计" hidden></section>
       <section id="workspace" hidden>
         <section id="batchSummary" class="batch-summary" aria-label="当前批次结果" hidden></section>
-        <section id="researchSynthesis" class="research-synthesis" aria-label="跨论文综合与当日简报" hidden></section>
+        <div id="researchSynthesis" hidden></div>
         <div class="section-bar"><div><p class="eyebrow">RESEARCH REPORTS</p><h2 id="sectionTitle">文献报告</h2></div><div class="export-control"><button class="quiet" id="importResearch">↑ 导入题录 / 研究库</button><label class="sr-only" for="exportKind">导出格式</label><select id="exportKind"><option value="html">离线 HTML</option><option value="markdown">Markdown</option><option value="json">JSON</option></select><button class="quiet" id="export">↓ 导出课题库</button></div></div>
         <div class="tabbar" role="tablist" aria-label="报告视图"><button role="tab" aria-selected="true" class="tab active" data-view="latest">最近更新</button><button role="tab" aria-selected="false" class="tab" data-view="all">全部文献</button><button role="tab" aria-selected="false" class="tab" data-view="evidence">精选精读</button><button role="tab" aria-selected="false" class="tab" data-view="graph">关系图谱</button><button role="tab" aria-selected="false" class="tab" data-view="actions">下一步研究</button></div>
         <div class="filters"><label class="search"><span>⌕</span><input id="search" type="search" placeholder="搜索文献、DOI 或研究方法…" aria-label="搜索文献"></label><select id="batchSelect" aria-label="选择分析批次"><option value="">最近批次</option></select><details class="more-filters"><summary>更多筛选</summary><div><select id="tagFilter" aria-label="筛选主题"><option value="">全部主题</option></select><input id="dateFilter" type="date" aria-label="筛选分析日期"><select id="priorityFilter" aria-label="筛选优先级"><option value="">全部优先级</option><option>P0</option><option>P1</option><option>P2</option><option>P3</option></select><select id="statusFilter" aria-label="筛选核验状态"><option value="">全部核验状态</option><option value="verified">已模型核验</option><option value="unverified">待核验</option></select><button class="quiet" id="clearFilters">清空筛选</button></div></details></div>
         <div class="results-line"><span id="resultCount"></span><span>研究计划均为待执行方案</span></div>
         <div id="projectGraph" hidden></div>
         <div id="cards" class="paper-grid"></div>
-        <section id="candidatePanel" class="candidate-panel" aria-label="候选文献与未核验草稿" hidden></section>
+        <div id="candidatePanel" hidden></div>
         <section id="importedSources" hidden></section>
-        <section id="batchHistoryPanel" aria-label="课题运行记录" hidden></section>
+        <div id="batchHistoryPanel" hidden></div>
       </section>
       <section id="alternate" hidden></section>
       <footer><div class="footer-mark">研序 <span>Paper Workbench</span></div><span>可追溯的阅读 · 有边界的推断 · 可检验的行动</span></footer>

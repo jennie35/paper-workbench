@@ -58,3 +58,30 @@ test('source page rendering is opt-in, signal-aware, identity-matched and limite
   const normal=await sources.acquire(openAlexPaper(oa()));assert.equal(calls[1].captureVisualPages,false);assert.equal(normal.page_images,undefined);
   controller.abort();await assert.rejects(sources.acquire(openAlexPaper(oa()),controller.signal),/取消/);assert.equal(calls.length,2);
 });
+
+test('public landing metadata reveals a real PDF link before source identity is checked',async()=>{
+  const calls=[],landing='https://journal.example/article/measurement',target='https://journal.example/files/measurement.pdf?version=1&download=1';
+  const sources=createResearchSources({extractPdf:async()=>extracted({unread_pages:[]}),request:async(url,options)=>{calls.push({url,options});if(url===landing)return new Response('<meta content="/files/measurement.pdf?version=1&amp;download=1" name="citation_pdf_url">',{headers:{'content-type':'text/html'}});if(url===target)return pdf();throw new Error('Unexpected URL '+url);}});
+  const paper=openAlexPaper(oa({primary_location:{is_oa:true,landing_page_url:landing}})),source=await sources.acquire(paper);
+  assert.equal(source.basis,'fulltext');assert.equal(source.url,target);assert.ok(paper.pdf_urls.includes(target));assert.equal(calls.length,2);assert.ok(calls.every(call=>!call.options.headers?.Authorization));
+});
+
+test('landing PDF extraction rejects local addresses and untrusted executable links',async()=>{
+  const {landingPdfLinks,derivedPdfUrls}=await import('../research-sources.js');
+  const html='<meta name="citation_pdf_url" content="https://127.0.0.1/private.pdf"><a href="javascript:alert(1)">PDF</a><a href="/paper/download">PDF</a><a href="https://evil.internal/a.pdf">PDF</a><a href="/another.pdf">Download</a>';
+  assert.deepEqual(landingPdfLinks(html,'https://journal.example/article'),['https://journal.example/paper/download','https://journal.example/another.pdf']);
+  assert.deepEqual(derivedPdfUrls(['https://arxiv.org/abs/2301.12345v2','https://unrelated.example/abs/2301.12345']),['https://arxiv.org/pdf/2301.12345v2']);
+});
+
+test('DOI-less OpenAlex identifiers can enrich a real Chinese record without asking a model to invent references',async()=>{
+  const record={title:'中文测量方法研究',doi:'',source_id:'https://openalex.org/W123',authors:['张三'],year:2025,source:'OpenAlex',pdf_urls:[]};let requested='';
+  const sources=createResearchSources({extractPdf:async()=>{},request:async(url)=>{requested=url;return Response.json(oa({id:record.source_id,doi:null,title:record.title,publication_year:2025,authorships:[{author:{display_name:'张三'}}]}));}});
+  await sources.supplement(record);assert.equal(requested,'https://api.openalex.org/works/W123');assert.equal(record.enrichment_attempted,true);assert.deepEqual(record.pdf_urls,['https://papers.example/study.pdf']);
+});
+
+test('large landing pages are stopped at 1 MB and cannot be mistaken for readable full text',async()=>{
+  const landing='https://journal.example/article';let parsed=false;
+  const sources=createResearchSources({extractPdf:async()=>{parsed=true;throw new Error('not a PDF');},request:async()=>new Response('not downloaded',{headers:{'content-type':'text/html','content-length':String(2*1024*1024)}})});
+  const paper=openAlexPaper(oa({primary_location:{landing_page_url:landing}})),source=await sources.acquire(paper);
+  assert.equal(source.basis,'abstract');assert.equal(parsed,false);assert.match(source.warnings.join(' '),/1 MB/);
+});

@@ -19,11 +19,13 @@ export function openAlexPaper(item) {
   if(!title||doi&&!/^10\.\d{4,9}\/\S+$/i.test(doi))return null;
   const locations=[item.best_oa_location,item.primary_location,...(Array.isArray(item.locations)?item.locations:[])].filter(Boolean);
   const published=locations.some(x=>x.is_published===true||x.version==='publishedVersion');
-  return {title,doi,source_id:plain(item.id),openalex_id:plain(item.id),external_ids:item.ids||{},language:plain(item.language),referenced_works:Array.isArray(item.referenced_works)?item.referenced_works:[],related_works:Array.isArray(item.related_works)?item.related_works:[],citation_count:Number.isInteger(item.cited_by_count)?item.cited_by_count:null,content_urls:item.content_urls||{},authors:(Array.isArray(item.authorships)?item.authorships:[]).map(x=>plain(x.author?.display_name)).filter(Boolean),year:Number.isInteger(item.publication_year)?item.publication_year:null,publication_date:plain(item.publication_date),volume:plain(item.biblio?.volume),issue:plain(item.biblio?.issue),pages:[plain(item.biblio?.first_page),plain(item.biblio?.last_page)].filter(Boolean).join('–'),publication_date_source:'OpenAlex publication_date；首次发表时间仍需核对出版记录',journal:plain(item.primary_location?.source?.display_name),url:doi?'https://doi.org/'+encodeURI(doi):publicDocumentUrl(item.primary_location?.landing_page_url)||plain(item.id),abstract:abstractFromIndex(item.abstract_inverted_index),abstract_source:'OpenAlex',publication_status:item.type==='preprint'?'preprint':published?'published':'unknown',versions:doi?[doi]:[],source:'OpenAlex',status:'pending',pdf_urls:[...new Set(locations.filter(x=>x.is_oa===true).map(x=>publicDocumentUrl(x.pdf_url)).filter(Boolean))].slice(0,3)};
+  const pdf_urls=[...new Set(locations.map(x=>publicDocumentUrl(x.pdf_url)).filter(Boolean))].slice(0,8),landing_urls=[...new Set([...locations.map(x=>publicDocumentUrl(x.landing_page_url)),publicDocumentUrl(item.open_access?.oa_url)].filter(Boolean).filter(url=>!pdf_urls.includes(url)))].slice(0,4);
+  return {title,doi,source_id:plain(item.id),openalex_id:plain(item.id),external_ids:item.ids||{},language:plain(item.language),referenced_works:Array.isArray(item.referenced_works)?item.referenced_works:[],related_works:Array.isArray(item.related_works)?item.related_works:[],citation_count:Number.isInteger(item.cited_by_count)?item.cited_by_count:null,content_urls:item.content_urls||{},authors:(Array.isArray(item.authorships)?item.authorships:[]).map(x=>plain(x.author?.display_name)).filter(Boolean),year:Number.isInteger(item.publication_year)?item.publication_year:null,publication_date:plain(item.publication_date),volume:plain(item.biblio?.volume),issue:plain(item.biblio?.issue),pages:[plain(item.biblio?.first_page),plain(item.biblio?.last_page)].filter(Boolean).join('–'),publication_date_source:'OpenAlex publication_date；首次发表时间仍需核对出版记录',journal:plain(item.primary_location?.source?.display_name),url:doi?'https://doi.org/'+encodeURI(doi):publicDocumentUrl(item.primary_location?.landing_page_url)||plain(item.id),abstract:abstractFromIndex(item.abstract_inverted_index),abstract_source:'OpenAlex',publication_status:item.type==='preprint'?'preprint':published?'published':'unknown',versions:doi?[doi]:[],source:'OpenAlex',status:'pending',pdf_urls,landing_urls};
 }
 export function mergeSourcePaper(existing,incoming) {
   if(!existing.abstract&&incoming.abstract){existing.abstract=incoming.abstract;existing.abstract_source=incoming.abstract_source||incoming.source;}
-  existing.pdf_urls=[...new Set([...(existing.pdf_urls||[]),...(incoming.pdf_urls||[])])].slice(0,3);
+  existing.pdf_urls=[...new Set([...(existing.pdf_urls||[]),...(incoming.pdf_urls||[])])].slice(0,8);
+  existing.landing_urls=[...new Set([...(existing.landing_urls||[]),...(incoming.landing_urls||[])])].slice(0,4);
   existing.sources=[...new Set([...(existing.sources||[existing.source]),incoming.source])];
   existing.versions=[...new Set([...(existing.versions||[]),...(incoming.versions||[])])];
   for(const key of ['volume','issue','pages'])if(!existing[key]&&incoming[key])existing[key]=incoming[key];
@@ -47,14 +49,31 @@ function pageBudget(extracted) {
   return (extracted.text_pages||[]).filter(page=>page.text).map(page=>({id:'PDF-P'+page.page,page:page.page,locator:'PDF 第 '+page.page+' 页',text:page.text}));
 }
 // Keep a hard bound even when Content-Length is missing or dishonest.
-async function pdfBytes(response,signal) {
-  const max=50*1024*1024;if(Number(response.headers?.get('content-length'))>max)throw new Error('全文超过 50 MB，未下载。');
+async function pdfBytes(response,signal,max=50*1024*1024) {
+  const limit=max===50*1024*1024?'全文超过 50 MB':'来源网页超过 1 MB';if(Number(response.headers?.get('content-length'))>max)throw new Error(limit+'，未下载。');
   if(!response.body?.getReader)throw new Error('浏览器不支持受限流式下载，未获取全文。');
   const reader=response.body.getReader(),chunks=[];let length=0;const abort=()=>reader.cancel().catch(()=>{});signal?.addEventListener('abort',abort,{once:true});
-  try{for(;;){if(signal?.aborted)throw new Error('已取消');const {done,value}=await reader.read();if(done)break;length+=value.byteLength;if(length>max)throw new Error('全文超过 50 MB，已停止下载。');chunks.push(value);}}
+  try{for(;;){if(signal?.aborted)throw new Error('已取消');const {done,value}=await reader.read();if(done)break;length+=value.byteLength;if(length>max)throw new Error(limit+'，已停止下载。');chunks.push(value);}}
   finally{signal?.removeEventListener('abort',abort);await reader.cancel().catch(()=>{});}
   if(signal?.aborted)throw new Error('全文下载已取消或超时。');
   const bytes=new Uint8Array(length);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}return bytes;
+}
+const identityKey=value=>String(value||'').normalize('NFKC').toLocaleLowerCase().replace(/[^\p{L}\p{N}]/gu,'');
+function sameMetadata(a,b){
+  if(a.doi&&b.doi)return doiOf(a.doi)===doiOf(b.doi);
+  if(a.source_id&&a.source_id===b.source_id)return true;
+  if(identityKey(a.title)!==identityKey(b.title)||a.year&&b.year&&a.year!==b.year)return false;
+  const authors=(a.authors||[]).map(identityKey);return (b.authors||[]).some(author=>authors.includes(identityKey(author)));
+}
+function attributes(tag){const values={};for(const match of tag.matchAll(/([\w:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/g))values[match[1].toLowerCase()]=match[2]??match[3]??match[4];return values;}
+export function landingPdfLinks(html,base){
+  const found=[],add=value=>{try{const url=publicDocumentUrl(new URL(String(value||'').replace(/&amp;/gi,'&'),base).href);if(url&&!found.includes(url))found.push(url);}catch{}};
+  for(const match of String(html).matchAll(/<meta\b[^>]{0,5000}>/gi)){const attr=attributes(match[0]);if(/^(?:citation_pdf_url|wkhealth_pdf_url|bepress_citation_pdf_url)$/i.test(attr.name||attr.property||''))add(attr.content);}
+  for(const match of String(html).matchAll(/<a\b([^>]{0,5000})>([\s\S]{0,1000}?)<\/a>/gi)){const attr=attributes(match[1]);if(/\.pdf(?:[?#/]|$)|\/pdf(?:[?#/]|$)/i.test(attr.href||'')||/\bPDF\b|下载全文|全文下载/i.test(match[2].replace(/<[^>]*>/g,' ')))add(attr.href);}
+  return found.slice(0,8);
+}
+export function derivedPdfUrls(values){
+  return values.flatMap(value=>{try{const url=new URL(value),match=url.pathname.match(/^\/abs\/(\d{4}\.\d{4,5}(?:v\d+)?|[a-z-]+\/\d{7}(?:v\d+)?)\/?$/i);return url.hostname==='arxiv.org'&&match?['https://arxiv.org/pdf/'+match[1]]:[];}catch{return [];}});
 }
 export function createResearchSources({request,extractPdf}) {
   const buffers=new Map();
@@ -81,24 +100,45 @@ export function createResearchSources({request,extractPdf}) {
     const payload=await response.json();if(!Array.isArray(payload.results))throw new Error('OpenAlex 未返回有效题录。');return payload.results.map(openAlexPaper).filter(Boolean);
   }
   async function supplement(paper,signal) {
-    if(paper.enrichment_attempted||!paper.doi)return;
-    const response=await request('https://api.openalex.org/works/https://doi.org/'+encodeURIComponent(paper.doi),{},signal,15000);
-    if(!response.ok)throw new Error(`OpenAlex DOI 补充不可用（HTTP ${response.status}）。`);
-    const item=openAlexPaper(await response.json());if(!item||item.doi!==paper.doi)throw new Error('OpenAlex DOI 补充未匹配当前论文身份。');mergeSourcePaper(paper,item);paper.enrichment_attempted=true;
+    if(paper.enrichment_attempted)return;
+    const identifier=String(paper.openalex_id||paper.source_id||'').match(/(?:^|\/)(W\d+)$/)?.[1],lookups=[];
+    if(identifier)lookups.push('https://api.openalex.org/works/'+identifier);
+    else if(paper.doi)lookups.push('https://api.openalex.org/works/https://doi.org/'+encodeURIComponent(paper.doi));
+    const titleLookup=new URL('https://api.openalex.org/works');titleLookup.searchParams.set('search',String(paper.title||'').slice(0,240));titleLookup.searchParams.set('per-page','3');lookups.push(titleLookup.href);
+    let failed=false;
+    for(const url of lookups.slice(0,2)){
+      const response=await request(url,{},signal,15000);
+      if(!response.ok){if(response.status!==404){failed=true;throw new Error(`OpenAlex 补充不可用（HTTP ${response.status}）。`);}continue;}
+      const payload=await response.json(),items=(Array.isArray(payload.results)?payload.results:[payload]).map(openAlexPaper).filter(Boolean),matched=items.find(item=>sameMetadata(paper,item));
+      if(matched){mergeSourcePaper(paper,matched);paper.enrichment_attempted=true;return;}
+    }
+    if(!failed)paper.enrichment_attempted=true;
   }
   async function acquire(paper,signal,{captureVisualPages=false}={}) {
     if(signal?.aborted)throw new Error('全文获取已取消。');
-    const diagnostics=paper.source_gaps||=[];
-    for(const value of (paper.pdf_urls||[]).slice(0,8)){
-      const url=publicDocumentUrl(value);if(!url)continue;
-      try{
-        const controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});const timer=setTimeout(abort,45000);
-        let bytes;try{const response=await request(url,{},controller.signal,20000);if(!response.ok)throw new Error(`全文下载 HTTP ${response.status}`);bytes=await pdfBytes(response,controller.signal);}finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);}
-        if(signal?.aborted)throw new Error('已取消');
-        const extracted=await extractPdf({name:'article.pdf',size:bytes.length,arrayBuffer:async()=>bytes.buffer},{signal,captureVisualPages});
-        if(signal?.aborted)throw new Error('已取消');
-        const source=asSource(extracted,paper,url);if(!captureVisualPages)delete source.page_images;buffers.set(source.sha256,bytes);return source;
-      }catch(error){if(signal?.aborted)throw error;diagnostics.push('开放全文：'+error.message);}
+    const diagnostics=paper.source_gaps||=[],record=error=>{const message='开放全文：'+error.message;if(!diagnostics.includes(message))diagnostics.push(message);},deadline=Date.now()+60000;
+    const landing=[...new Set([...(paper.landing_urls||[]),paper.url].map(publicDocumentUrl).filter(Boolean).filter(url=>!/(?:^|\.)(?:dx\.)?doi\.org$/i.test(new URL(url).hostname)))].slice(0,2),tried=new Set();let attempts=0;
+    async function fetchBytes(url,max){
+      const remaining=deadline-Date.now();if(remaining<=0)throw new Error('本次正文获取时间预算已用完，可从检查点继续。');
+      const controller=new AbortController(),abort=()=>controller.abort();signal?.addEventListener('abort',abort,{once:true});const timer=setTimeout(abort,Math.min(remaining,30000));
+      try{const response=await request(url,{},controller.signal,Math.min(remaining,18000));if(!response.ok)throw new Error(`来源请求 HTTP ${response.status}`);const isPdf=/application\/pdf/i.test(response.headers?.get('content-type')||'');return {bytes:await pdfBytes(response,controller.signal,isPdf?50*1024*1024:max),isPdf};}
+      finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);}
+    }
+    async function parse(bytes,url){
+      if(signal?.aborted)throw new Error('已取消');const extracted=await extractPdf({name:'article.pdf',size:bytes.length,arrayBuffer:async()=>bytes.buffer},{signal,captureVisualPages});
+      if(signal?.aborted)throw new Error('已取消');const source=asSource(extracted,paper,url);if(!captureVisualPages)delete source.page_images;buffers.set(source.sha256,bytes);return source;
+    }
+    async function tryPdf(value){
+      const url=publicDocumentUrl(value);if(!url||tried.has(url)||attempts>=8||Date.now()>=deadline)return null;tried.add(url);attempts+=1;
+      try{const {bytes}=await fetchBytes(url,50*1024*1024);return await parse(bytes,url);}catch(error){if(signal?.aborted)throw error;record(error);return null;}
+    }
+    for(const value of [...(paper.pdf_urls||[]),...derivedPdfUrls(landing)].slice(0,8)){const source=await tryPdf(value);if(source)return source;}
+    for(const url of landing){
+      if(Date.now()>=deadline)break;
+      try{const {bytes,isPdf}=await fetchBytes(url,1024*1024);if(isPdf)return await parse(bytes,url);
+        const links=landingPdfLinks(new TextDecoder().decode(bytes),url);paper.pdf_urls=[...new Set([...(paper.pdf_urls||[]),...links])].slice(0,8);
+        for(const value of links){const source=await tryPdf(value);if(source)return source;}
+      }catch(error){if(signal?.aborted)throw error;record(error);}
     }
     if(paper.abstract){const abstract=paper.abstract.slice(0,60000);return {basis:'abstract',blocks:[{id:'ABSTRACT-1',page:null,locator:(paper.abstract_source||paper.source)+' abstract',text:abstract}],url:paper.url,pages:0,unread_pages:[],warnings:diagnostics,characters_available:paper.abstract.length,characters_sent:abstract.length};}
     return null;

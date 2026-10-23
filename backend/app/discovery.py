@@ -4,6 +4,7 @@ import unicodedata
 import calendar
 import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 import httpx
 
@@ -83,6 +84,7 @@ def openalex_paper(p):
     inverted = p.get('abstract_inverted_index') or {}
     words = {i: word for word, indices in inverted.items() for i in indices}
     first, last = biblio.get('first_page') or '', biblio.get('last_page') or ''
+    locations = [x for x in [p.get('best_oa_location'), loc, *(p.get('locations') or [])] if isinstance(x, dict)]
     return {'title': p.get('title') or p.get('display_name') or '', 'abstract': ' '.join(words[i] for i in sorted(words)),
             'doi': doi(p.get('doi')), 'authors': [x.get('author', {}).get('display_name', '') for x in p.get('authorships', [])],
             'year': p.get('publication_year'), 'publication_date': p.get('publication_date', ''), 'first_publication_date': '',
@@ -90,13 +92,45 @@ def openalex_paper(p):
             'volume': biblio.get('volume') or '', 'issue': biblio.get('issue') or '',
             'pages': first + ('–' + last if last and last != first else ''), 'journal': (loc.get('source') or {}).get('display_name', ''),
             'url': loc.get('landing_page_url') or p.get('doi') or p.get('id') or '',
-            'pdf_urls': list(dict.fromkeys(x['pdf_url'] for x in p.get('locations', []) if x.get('pdf_url') and x.get('is_oa') is True)),
-            'publication_status': 'published' if loc.get('is_published') is True else ('preprint' if p.get('type') == 'preprint' else 'unknown'),
+            'pdf_urls': list(dict.fromkeys(x['pdf_url'] for x in locations if x.get('pdf_url') and x.get('is_oa') is True)),
+            'landing_urls': list(dict.fromkeys(x['landing_page_url'] for x in locations if x.get('landing_page_url') and x.get('is_oa') is True)),
+            'publication_status': 'preprint' if p.get('type') == 'preprint' else ('published' if any(x.get('is_published') is True or x.get('version') == 'publishedVersion' for x in locations) else 'unknown'),
             'versions': [doi(p.get('doi'))] if p.get('doi') else [], 'source': 'OpenAlex', 'source_ids': p.get('ids') or {'openalex': p.get('id')},
             'openalex_id': p.get('id'), 'language': p.get('language'), 'citation_count': p.get('cited_by_count'),
             'referenced_works': p.get('referenced_works') or [], 'related_works': p.get('related_works') or [],
             'cited_by_api_url': p.get('cited_by_api_url'), 'content_urls': p.get('content_urls') or {},
             'has_content': p.get('has_content') or {}, 'retrieved_at': dt.datetime.now(dt.timezone.utc).isoformat()}
+
+
+def merge_metadata(existing, incoming):
+    """Keep actual abstracts/fulltext clues when Crossref arrives first."""
+    for field in ('pdf_urls', 'landing_urls', 'versions', 'referenced_works', 'related_works'):
+        existing[field] = list(dict.fromkeys([*(existing.get(field) or []), *(incoming.get(field) or [])]))
+    existing['sources'] = list(dict.fromkeys([*(existing.get('sources') or [existing.get('source')]), incoming.get('source')]))
+    for field in ('source_ids', 'content_urls', 'has_content'):
+        existing[field] = {**(incoming.get(field) or {}), **(existing.get(field) or {})}
+    for field in ('abstract', 'openalex_id', 'language', 'citation_count', 'retrieved_at', 'url', 'journal'):
+        if incoming.get(field) is not None and (not existing.get(field) or field == 'citation_count'):
+            existing[field] = incoming[field]
+    if existing.get('publication_status') == 'unknown' and incoming.get('publication_status'):
+        existing['publication_status'] = incoming['publication_status']
+    return existing
+
+
+def crossref_paper(p):
+    bibliography = crossref_bibliography(p)
+    published = p.get('type') in ('journal-article', 'proceedings-article') and bool(p.get('container-title'))
+    relations = [x.get('id', '') for key in ('is-preprint-of', 'has-preprint', 'is-version-of', 'has-version') for x in p.get('relation', {}).get(key, [])]
+    links = [x.get('URL') for x in p.get('link', []) if x.get('URL') and (x.get('content-type') == 'application/pdf' or re.search(r'\.pdf(?:[?#]|$)', x.get('URL'), re.I))]
+    primary = ((p.get('resource') or {}).get('primary') or {}).get('URL')
+    return {'title': (p.get('title') or [''])[0], 'abstract': re.sub('<[^>]+>', ' ', p.get('abstract', '')), 'doi': doi(p.get('DOI')),
+            'authors': [' '.join([x.get('given', ''), x.get('family', '')]).strip() for x in p.get('author', [])],
+            **bibliography, 'journal': (p.get('container-title') or [''])[0], 'url': p.get('URL', ''), 'pdf_urls': links,
+            'landing_urls': [primary] if primary else [],
+            'publication_status': 'published' if published else ('preprint' if p.get('type') == 'posted-content' else 'unknown'),
+            'versions': relations + [doi(p.get('DOI'))], 'source': 'Crossref', 'source_ids': {'doi': doi(p.get('DOI'))},
+            'referenced_works': [doi(x.get('DOI')) for x in p.get('reference', []) if x.get('DOI')],
+            'citation_count': p.get('is-referenced-by-count'), 'retrieved_at': dt.datetime.now(dt.timezone.utc).isoformat()}
 
 
 def source_date(parts):
@@ -143,40 +177,48 @@ def crossref_bibliography(p):
 
 def search(query, start_year, config):
     """Each provider can fail independently; return diagnostics, never invent hits."""
-    results, errors = [], []
-    with httpx.Client(timeout=35, trust_env=False) as c:
-        try:
-            r = c.get('https://api.crossref.org/works', params={'query.bibliographic': query, 'filter': f'from-pub-date:{start_year}-01-01', 'rows': 40}, headers={'User-Agent': 'PaperWorkbench/0.1 (metadata research)'})
-            r.raise_for_status()
-            for p in r.json()['message']['items']:
-                bibliography = crossref_bibliography(p)
-                published = p.get('type') in ('journal-article', 'proceedings-article') and bool(p.get('container-title'))
-                relations = [x.get('id', '') for key in ('is-preprint-of', 'has-preprint', 'is-version-of', 'has-version') for x in p.get('relation', {}).get(key, [])]
-                results.append({'title': (p.get('title') or [''])[0], 'abstract': re.sub('<[^>]+>', '', p.get('abstract', '')), 'doi': doi(p.get('DOI')), 'authors': [' '.join([x.get('given', ''), x.get('family', '')]).strip() for x in p.get('author', [])], **bibliography, 'journal': (p.get('container-title') or [''])[0], 'url': p.get('URL', ''), 'pdf_urls': [x['URL'] for x in p.get('link', []) if x.get('content-type') == 'application/pdf'], 'publication_status': 'published' if published else ('preprint' if p.get('type') == 'posted-content' else 'unknown'), 'versions': relations + [doi(p.get('DOI'))], 'source': 'Crossref', 'source_ids': {'doi': doi(p.get('DOI'))}, 'referenced_works': [doi(x.get('DOI')) for x in p.get('reference', []) if x.get('DOI')], 'citation_count': p.get('is-referenced-by-count'), 'retrieved_at': dt.datetime.now(dt.timezone.utc).isoformat()})
-        except (httpx.HTTPError, KeyError, TypeError):
-            errors.append('Crossref 元数据请求失败或返回不完整')
-        key = config.get('openalex_key')
-        if key:
+    def crossref():
+        with httpx.Client(timeout=25, trust_env=False) as c:
             try:
-                r = c.get('https://api.openalex.org/works', params={'search': query, 'filter': f'from_publication_date:{start_year}-01-01', 'per-page': 40}, headers={'Authorization': 'Bearer ' + key})
+                r = c.get('https://api.crossref.org/works', params={'query.bibliographic': query, 'filter': f'from-pub-date:{start_year}-01-01', 'rows': 40}, headers={'User-Agent': 'PaperWorkbench/0.1 (metadata research)'})
                 r.raise_for_status()
-                for p in r.json()['results']:
-                    results.append(openalex_paper(p))
-            except (httpx.HTTPError, KeyError, TypeError):
-                errors.append('OpenAlex 元数据请求失败或返回不完整')
-        else:
-            errors.append('OpenAlex 未配置，当前仅使用 Crossref')
+                return [crossref_paper(p) for p in r.json()['message']['items']], []
+            except (httpx.HTTPError, KeyError, TypeError, ValueError):
+                return [], ['Crossref 元数据请求失败或返回不完整']
+
+    def openalex():
+        key = config.get('openalex_key')
+        # Basic public queries are available without an API key. A key is only
+        # sent to this fixed source host, never to publishers or model endpoints.
+        with httpx.Client(timeout=25, trust_env=False) as c:
+            try:
+                headers = {'Authorization': 'Bearer ' + key} if key else {}
+                r = c.get('https://api.openalex.org/works', params={'search': query, 'filter': f'from_publication_date:{start_year}-01-01', 'per-page': 40}, headers=headers)
+                if r.status_code in (401, 403):
+                    return [], ['OpenAlex 访问受限；可配置有效密钥，Crossref 检索仍继续']
+                if r.status_code == 429:
+                    return [], ['OpenAlex 请求额度或频率受限；稍后重试或配置自己的密钥']
+                r.raise_for_status()
+                return [openalex_paper(p) for p in r.json()['results']], []
+            except (httpx.HTTPError, KeyError, TypeError, ValueError):
+                return [], ['OpenAlex 元数据请求失败或返回不完整']
+
+    # One request per provider; parallelism never violates Crossref's public
+    # pool concurrency=1. Sources cannot receive the model API credentials.
+    results, errors = [], []
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(fn) for fn in (crossref, openalex)]
+        for future in futures:
+            found, diagnostics = future.result()
+            results.extend(found)
+            errors.extend(diagnostics)
     merged = []
     for p in results:
         if not p['title']:
             continue
         existing = next((x for x in merged if same_paper(x, p)), None)
         if existing:
-            existing['pdf_urls'] = list(dict.fromkeys(existing['pdf_urls'] + p['pdf_urls']))
-            existing['versions'] = list(dict.fromkeys(existing['versions'] + p['versions']))
-            for field in ('source_ids', 'openalex_id', 'language', 'citation_count', 'referenced_works', 'related_works', 'content_urls', 'has_content', 'retrieved_at'):
-                if p.get(field) is not None and (not existing.get(field) or field == 'citation_count'):
-                    existing[field] = p[field]
+            merge_metadata(existing, p)
         else:
             merged.append(p)
     return merged, errors

@@ -37,6 +37,7 @@ function mockFetch(items,{failAnalysis=0,analysisGate=null,fulltext=true}={}){
     if(String(url).startsWith('https://api.openalex.org/works'))return response({results:[]});
     if(String(url).endsWith('/models'))return response({data:[{id:'fixture-text'},{id:'fixture-text'},{id:'fixture-other'}]});
     const body=JSON.parse(options.body),system=body.messages[0].content,input=JSON.parse(body.messages[1].content);
+    if(input.task==='search-plan')return modelAnswer({queries:[{query:input.topic.keywords[0]||'fixture measurement',language:'en',intent:'Synthetic query fixture'}]});
     if(system.includes('实质相关性筛选'))return modelAnswer({selected:input.candidates.map((_,index)=>({index,reason:'This fixture directly addresses the specified research question.',score:0.95})),excluded:[]});
     if(system.includes('阅读所有提供的正文块'))return modelAnswer({notes:input.blocks.map(block=>({source_block_ids:[block.id],text:block.text})),required_visual_pages:[]});
     if(system.includes('跨论文'))return modelAnswer({supports:[],conflicts:[],judgement_changes:[],priority_actions:[],route_decisions:[],limitations:['Fixed fixture synthesis; does not raise evidence strength.']});
@@ -96,7 +97,7 @@ test('located full-text core reports count once while model-supplied image and s
 
 test('no abstract means no model analysis, real shortage, and progressive search ranges',async()=>{
   const mock=mockFetch([paper('10.1234/no-abstract','Title without an abstract','')]);const {api,project}=await setup(mock.fetchImpl);const job=await settled(api,(await start(api,project,5)).id);
-  assert.equal(job.drafts_analyzed,0);assert.equal(job.checkpoint.draft_shortfall,5);assert.equal(job.checkpoint.candidates[0].status,'no_fulltext');assert.equal(mock.calls.filter(x=>x.url.endsWith('/chat/completions')&&!JSON.parse(x.options.body).messages[0].content.includes('实质相关性筛选')).length,0);assert.equal(job.checkpoint.search_log.length,6);const searches=mock.calls.filter(x=>x.url.startsWith('https://api.crossref.org'));assert.match(searches[0].url,/from-pub-date/);assert.equal(new URL(searches.at(-1).url).searchParams.has('filter'),false);
+  assert.equal(job.drafts_analyzed,0);assert.equal(job.checkpoint.draft_shortfall,5);assert.equal(job.checkpoint.candidates[0].status,'no_fulltext');assert.equal(mock.calls.filter(x=>x.url.endsWith('/chat/completions')&&!JSON.parse(x.options.body).messages[0].content.includes('实质相关性筛选')&&JSON.parse(JSON.parse(x.options.body).messages[1].content).task!=='search-plan').length,0);assert.equal(job.checkpoint.search_log.length,6);const searches=mock.calls.filter(x=>x.url.startsWith('https://api.crossref.org'));assert.match(searches[0].url,/from-pub-date/);assert.equal(new URL(searches.at(-1).url).searchParams.has('filter'),false);
 });
 
 test('unsupported report fields and absent research steps stay empty instead of generating placeholder findings',async()=>{
@@ -110,10 +111,11 @@ test('unsupported report fields and absent research steps stay empty instead of 
 });
 
 test('repeated runs and another project exclude stored studies without another paid analysis or a new association',async()=>{
-  const mock=mockFetch([paper('10.1234/reuse','Reusable fixture')]);const {api,project,store}=await setup(mock.fetchImpl);await settled(api,(await start(api,project)).id);const paid=mock.calls.filter(x=>x.url.endsWith('/chat/completions')).length;
-  const second=await settled(api,(await start(api,project)).id);assert.equal(second.drafts_analyzed,0);assert.deepEqual(second.checkpoint.reused,[]);assert.equal(second.checkpoint.draft_shortfall,1);assert.equal(second.checkpoint.candidates[0].status,'duplicate');assert.equal(second.checkpoint.candidates[0].paper_id,undefined);assert.equal(mock.calls.filter(x=>x.url.endsWith('/chat/completions')).length,paid);
+  const mock=mockFetch([paper('10.1234/reuse','Reusable fixture')]);const {api,project,store}=await setup(mock.fetchImpl);await settled(api,(await start(api,project)).id);const paid=mock.calls.filter(x=>x.url.endsWith('/chat/completions')&&JSON.parse(JSON.parse(x.options.body).messages[1].content).task!=='search-plan').length;
+  const second=await settled(api,(await start(api,project)).id);assert.equal(second.drafts_analyzed,0);assert.deepEqual(second.checkpoint.reused,[]);assert.equal(second.checkpoint.draft_shortfall,1);assert.equal(second.checkpoint.candidates[0].status,'duplicate');assert.equal(second.checkpoint.candidates[0].paper_id,undefined);assert.equal(mock.calls.filter(x=>x.url.endsWith('/chat/completions')&&JSON.parse(JSON.parse(x.options.body).messages[1].content).task!=='search-plan').length,paid);
+  assert.equal(mock.calls.filter(x=>x.url.endsWith('/chat/completions')&&JSON.parse(JSON.parse(x.options.body).messages[1].content).task==='search-plan').length,1,'same-scope batches reuse the planned queries without another model request');
   const other=await api.handle('/api/projects',{method:'POST',body:JSON.stringify({name:'Second topic'})});await api.handle(`/api/projects/${other.id}/scope`,{method:'PUT',body:JSON.stringify({research_question:'Related question',inferred:false})});
-  const third=await settled(api,(await start(api,other)).id);assert.deepEqual(third.checkpoint.reused,[]);assert.equal((await api.handle(`/api/projects/${other.id}/papers`)).length,0);assert.equal(store.snapshot().links.length,1);assert.equal(store.snapshot().counter,1);assert.equal(mock.calls.filter(x=>x.url.endsWith('/chat/completions')).length,paid);
+  const third=await settled(api,(await start(api,other)).id);assert.deepEqual(third.checkpoint.reused,[]);assert.equal((await api.handle(`/api/projects/${other.id}/papers`)).length,0);assert.equal(store.snapshot().links.length,1);assert.equal(store.snapshot().counter,1);assert.equal(mock.calls.filter(x=>x.url.endsWith('/chat/completions')&&JSON.parse(JSON.parse(x.options.body).messages[1].content).task!=='search-plan').length,paid);
 });
 
 test('failed analysis preserves pending candidate and resumes only unfinished work',async()=>{
@@ -180,9 +182,9 @@ test('an end-of-job storage failure stays visible in memory and can be exported 
   failFinal=false;await api.handle('/api/projects',{method:'POST',body:JSON.stringify({name:'Storage writable again'})});assert.equal(memory.snapshot().papers.length,1);assert.equal(memory.snapshot().jobs[0].status,'failed');
 });
 
-test('candidate-only shortages and search reasons remain in every export even when no analysis could run',async()=>{
+test('candidate archives survive JSON and Markdown while offline HTML omits empty retrieval logs',async()=>{
   const mock=mockFetch([paper('10.1234/gap','Candidate without abstract','')]);const {api,project}=await setup(mock.fetchImpl);await settled(api,(await start(api,project)).id);
-  for(const kind of ['json','markdown','html']){const content=await (await api.handle(`/api/projects/${project.id}/export?kind=${kind}`)).text();assert.match(content,/Candidate without abstract/);assert.match(content,/等待论文正文|补充摘要与开放全文|检索源未提供摘要/);assert.match(content,/Fixture research question/);if(kind==='json'){const bundle=JSON.parse(content);assert.equal(bundle.papers.length,0);assert.equal(bundle.jobs[0].checkpoint.draft_shortfall,1);assert.equal(bundle.jobs[0].checkpoint.search_log.length,6);}}
+  for(const kind of ['json','markdown','html']){const content=await (await api.handle(`/api/projects/${project.id}/export?kind=${kind}`)).text();if(kind==='html'){assert.doesNotMatch(content,/Candidate without abstract|检索来源与筛选记录|跨论文综合/);}else{assert.match(content,/Candidate without abstract/);assert.match(content,/等待论文正文|补充摘要与开放全文|检索源未提供摘要/);}assert.match(content,/Fixture research question/);if(kind==='json'){const bundle=JSON.parse(content);assert.equal(bundle.papers.length,0);assert.equal(bundle.jobs[0].checkpoint.draft_shortfall,1);assert.equal(bundle.jobs[0].checkpoint.search_log.length,6);}}
 });
 
 test('cross-project version matches are skipped and wider search fills the requested number with new studies',async()=>{
@@ -201,4 +203,11 @@ test('a committed record with a stale pending checkpoint is recovered only for i
   const saved=snapshot.jobs.find(item=>item.id===first.id);saved.status='failed';saved.drafts_analyzed=0;saved.reports_generated=0;saved.checkpoint.drafts_analyzed=0;saved.checkpoint.reports_generated=0;saved.checkpoint.candidates[0].status='pending';delete saved.checkpoint.candidates[0].paper_id;
   const restoredStore=memoryStore(snapshot),restored=createBrowserApi({store:restoredStore,fetchImpl:mock.fetchImpl});await restored.configure(config);const analysisCalls=()=>mock.calls.filter(item=>item.url.endsWith('/chat/completions')&&JSON.parse(JSON.parse(item.options.body).messages[1].content).paper).length,analyzed=analysisCalls();
   await restored.handle(`/api/jobs/${first.id}/retry`,{method:'POST'});const result=await settled(restored,first.id);assert.equal(result.reports_generated,1);assert.equal(result.drafts_analyzed,1);assert.equal(restoredStore.snapshot().counter,1);assert.equal((await restored.handle(`/api/projects/${project.id}/papers`)).length,1);assert.equal(analysisCalls(),analyzed);
+});
+
+test('a legacy exhausted batch refreshes real metadata under the new search strategy and preserves its ID',async()=>{
+  const item=paper('10.1234/exhausted','Recovered exhausted fixture'),year=new Date().getUTCFullYear(),oldAttempts=[year-2,year-5,'all'].flatMap(from=>['Crossref','OpenAlex'].map(source=>`${source}:${from}:fixture`));
+  const legacy={version:1,counter:0,papers:[],links:[],references:[],publicSettings:{},projects:[{id:'legacy-refresh',name:'Fixture topic',scope:{research_question:'Fixture research question',keywords:['fixture'],inferred:false}}],jobs:[{id:'exhausted-refresh',project_id:'legacy-refresh',mode:'direct',requested:1,status:'waiting_sources',checkpoint:{scope_snapshot:{research_question:'Fixture research question',keywords:['fixture'],inferred:false},candidates:[{title:item.title[0],doi:item.DOI,authors:['Ada Example'],year:2026,publication_status:'published',source:'Crossref',status:'excluded',reason:'Legacy broad query lacked useful text',pdf_urls:[]}],completed:[],reused:[],searched_sources:oldAttempts,search_log:[],diagnostics:[]}}]};
+  const mock=mockFetch([item]),store=memoryStore(legacy),api=createBrowserApi({store,fetchImpl:mock.fetchImpl});await api.configure(config);await api.handle('/api/jobs/exhausted-refresh/retry',{method:'POST'});const job=await settled(api,'exhausted-refresh');
+  assert.equal(job.id,'exhausted-refresh');assert.equal(job.core_reports,1);assert.equal(job.status,'completed');assert.equal(job.checkpoint.search_plan.version,2);assert.equal(job.checkpoint.search_diagnosis.completed,1);assert.ok(mock.calls.some(call=>call.url.startsWith('https://api.crossref.org')));assert.equal(store.snapshot().counter,1);
 });

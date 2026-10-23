@@ -13,3 +13,4 @@ pypdfium2==5.14.0
 pillow==12.3.0
 markdown-it-py==4.2.0
 opencc-python-reimplemented==0.1.7
+tzdata==2026.5

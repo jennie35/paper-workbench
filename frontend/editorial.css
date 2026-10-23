@@ -188,6 +188,27 @@ main.is-library { padding-top: 30px; }
 .empty-actions { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
 #candidateDetails, #batchHistory { color: var(--muted); border-color: var(--line); }
 #candidateDetails > summary, #batchHistory > summary { color: #4a555b; font-size: 13px; }
+.project-schedule { margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--line); }
+.schedule-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.schedule-heading h3 { margin: 4px 0 0; font-size: 22px; }
+.schedule-heading .eyebrow { margin: 0; }
+.schedule-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; margin: 18px 0; }
+.schedule-toggle { display: flex; align-items: center; gap: 10px; grid-column: 1 / -1; }
+.schedule-toggle input { width: 18px; height: 18px; }
+.schedule-count { margin: 0; }
+.schedule-count small { display: block; margin-top: 8px; font-size: 12px; color: var(--muted); }
+.schedule-status { padding: 12px 14px; border-left: 2px solid var(--line); line-height: 1.8; font-size: 13px; overflow-wrap: anywhere; }
+.search-diagnosis { margin-top: 14px; color: var(--muted); font-size: 13px; }
+.search-diagnosis p { margin: 5px 0; }
+.scope-query-preview { grid-column: 1 / -1; background: #f1f3f0; padding: 16px 18px; font-size: 13px; }
+.scope-query-preview dl { margin: 12px 0 0; }
+.scope-query-preview dl > div { display: grid; grid-template-columns: 76px 1fr; gap: 12px; padding: 4px 0; }
+.scope-query-preview dt { color: var(--muted); }
+.scope-query-preview dd { margin: 0; overflow-wrap: anywhere; }
+.research-optional { grid-column: 1 / -1; margin: 4px 0; }
+.research-optional > summary { cursor: pointer; font-size: 14px; }
+.research-optional > .config-grid { margin-top: 14px; }
+@media (max-width: 620px) { .schedule-fields { grid-template-columns: 1fr; } .schedule-heading { align-items: start; } }
 .candidate-toolbar label, .candidate-toolbar > span, .candidate-toolbar p { color: var(--muted); }
 .candidate-toolbar select { background: transparent; border-color: #bdc4c0; color: var(--ink); border-radius: 0; }
 .candidate-result { background: #f4f3ed; border: 1px solid #d1cebf; border-left: 2px solid #b4a589; border-radius: 0; padding: 20px; }

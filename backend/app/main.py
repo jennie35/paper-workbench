@@ -23,7 +23,7 @@ from rq import Queue, Retry
 from sqlalchemy import delete, select
 
 from .config import DATA, REDIS_URL, ALLOWED_ORIGINS, MAX_BYTES, TASK_BACKEND
-from .db import init_db, session, Project, Reference, Job, Paper, Setting, ProjectPaper, ImportedCandidate, ImportPreview, now
+from .db import init_db, session, Project, Reference, Job, Paper, Setting, ProjectPaper, ImportedCandidate, ImportPreview, ProjectSchedule, now
 from .schemas import Login, ProjectInput, ProviderInput, Scope, BatchInput
 from .security import encryption, password_hash, check_password, issue_token, valid_token, public_url
 from .pipeline import configuration, safe_error
@@ -51,9 +51,13 @@ async def lifespan(app):
     if TASK_BACKEND == 'local':
         from .local_tasks import recover
         recover()
+    from .schedules import start_scheduler
+    schedule_stop, schedule_thread = start_scheduler(enqueue, _admission_lock, configuration, reconcile_job)
     try:
         yield
     finally:
+        schedule_stop.set()
+        schedule_thread.join(timeout=3)
         if TASK_BACKEND == 'local':
             from .local_tasks import shutdown
             shutdown()
@@ -386,7 +390,7 @@ def enqueue(jid):
     if TASK_BACKEND == 'local':
         from .local_tasks import enqueue as local_enqueue
         return local_enqueue(jid)
-    q = Queue('analysis', connection=Redis.from_url(REDIS_URL))
+    q = Queue('analysis', connection=Redis.from_url(REDIS_URL, socket_connect_timeout=3, socket_timeout=3))
     old = q.fetch_job(jid)
     if old and str(old.get_status()).split('.')[-1].lower() in ('failed', 'finished', 'stopped', 'canceled'):
         old.delete()
@@ -475,6 +479,7 @@ def delete_project(pid: str):
         s.execute(delete(Reference).where(Reference.project_id == pid))
         s.execute(delete(ImportedCandidate).where(ImportedCandidate.project_id == pid))
         s.execute(delete(ImportPreview).where(ImportPreview.project_id == pid))
+        s.execute(delete(ProjectSchedule).where(ProjectSchedule.project_id == pid))
         s.delete(project)
     # Commit first: a failed transaction must leave the original reference files
     # intact. A cleanup error cannot roll back committed records; report it plainly.
@@ -905,6 +910,8 @@ def export(pid: str, kind: str = 'html', legacy: bool = False):
 
 from .library_routes import install_library_routes
 install_library_routes(app, auth, get_project, papers_for, save_upload, enqueue, _admission_lock, configuration)
+from .schedules import install_schedule_routes
+install_schedule_routes(app, auth, get_project, configuration, _admission_lock)
 
 
 if os.getenv('SERVE_FRONTEND') == '1':

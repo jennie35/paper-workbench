@@ -72,9 +72,9 @@ test('batch summary reports target and actual new count without reuse or shortfa
   const job={id:'batch',requested:5,status:'completed',checkpoint:{reused:['old'],completed:[]}},fields=new Map();
   const $=id=>{if(!fields.has(id))fields.set(id,el());return fields.get(id);};
   const context=vm.createContext({loadProject(){},retryForm(){},api(){},renderImportedSources(){},renderProjectGraph(){},state:{demo:false},$,selectedBatch:()=>job,summarizeBatch,batchReportCounts:()=>({generated:2,reused:1}),batchLabel:()=> 'B001',dateLabel:()=> '10-22',esc:String,badge:String,bindResultActions(){}});
-  vm.runInContext(extract('function renderBatchSummary(){','function directDraftCount('),context);context.renderBatchSummary();
+  vm.runInContext(extract('function searchDiagnosisHtml(','function directDraftCount('),context);context.renderBatchSummary();
   const html=$('batchSummary').innerHTML;
-  assert.match(html,/目标新增 5 篇/);assert.match(html,/已新增 2\/5 篇正文报告/);
+  assert.match(html,/目标新增 5 篇/);assert.match(html,/已生成 2\/5 篇正文报告/);
   assert.doesNotMatch(html,/复用|缺额|本批新增 5 篇/);assert.match(html,/data-retry="batch"/);
 });
 

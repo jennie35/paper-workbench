@@ -1,9 +1,10 @@
-import {createResearchSources,mergeSourcePaper,publicDocumentUrl} from './research-sources.js?v=20261023-core1';
-import {normalizeResearchConfig,normalizeResearchLogic,buildReportPrompt,buildScopePrompt,buildSynthesisPrompt,normalizeSynthesis} from './research-contract.js?v=20261023-core1';
-import {createDirectoryWorkspaceStore} from './research-storage.js?v=20261023-core1';
-import {researchFlowSvg,exportResearchMarkdown,exportOfflineHtml} from './research-export.js?v=20261023-core1';
-import {VISUAL_REVIEW_PROMPT,imageSha256,stampVisualReview,sourceImageBytes,visualAsset} from './paper-visuals.js?v=20261023-core1';
-import {coreReportStatus,sourceGroups,CORE_READING_PROMPT} from './core-report.js?v=20261023-core1';
+import {createResearchSources,mergeSourcePaper,publicDocumentUrl} from './research-sources.js?v=20261023-search2';
+import {normalizeResearchConfig,normalizeResearchLogic,buildReportPrompt,buildScopePrompt,buildSynthesisPrompt,normalizeSynthesis} from './research-contract.js?v=20261023-search2';
+import {createDirectoryWorkspaceStore} from './research-storage.js?v=20261023-search2';
+import {researchFlowSvg,exportResearchMarkdown,exportOfflineHtml} from './research-export.js?v=20261023-search2';
+import {VISUAL_REVIEW_PROMPT,imageSha256,stampVisualReview,sourceImageBytes,visualAsset} from './paper-visuals.js?v=20261023-search2';
+import {SEARCH_VERSION,searchTopic,SEARCH_PLAN_PROMPT,normalizeSearchPlan,SHORTLIST_PROMPT,selectedCandidates,compareCandidates,searchDiagnosis} from './research-search.js?v=20261023-search2';
+import {coreReportStatus,sourceGroups,CORE_READING_PROMPT} from './core-report.js?v=20261023-search2';
 // Browser-owned records. Model credentials intentionally never enter this store.
 const DATABASE = 'paper-workbench-browser-v1';
 const LOCK = 'paper-workbench-browser-analysis-v1';
@@ -68,7 +69,7 @@ function metadata(item) {
   const publicationDates=dates.map(record=>({source:record.key,value:record.parts.map((value,index)=>index?String(value).padStart(2,'0'):String(value)).join('-')}));
   const dateInfo={first_publication_date_status:'检索元数据日期，尚未逐一核对出版社页面',publication_dates:publicationDates,date_differences:new Set(publicationDates.map(record=>record.value)).size>1?'在线、印刷或汇总日期不同；保留原始日期，首次发表时间仍需核对出版社页面。':'',pages:cleanText(item.page||'')};
   const versions=Object.entries(item.relation||{}).filter(([key])=>['is-preprint-of','has-preprint','is-version-of','has-version'].includes(key)).flatMap(([,values])=>Array.isArray(values)?values.map(x=>doiKey(x.id)):[]);
-  return {title,doi,...dateInfo,authors:(item.author||[]).map(x=>[x.given,x.family].filter(Boolean).join(' ')).filter(Boolean),year:Number.isInteger(date[0])?date[0]:null,publication_date:dateText,first_publication_date:dateText,date_precision:date.length===3?'day':date.length===2?'month':date.length===1?'year':'unknown',date_source:dateRecord?.key||'未核验',issue_year:item.issued?.['date-parts']?.[0]?.[0]||null,volume:cleanText(item.volume||''),issue:cleanText(item.issue||''),journal:cleanText(item['container-title']?.[0]||''),url:'https://doi.org/'+encodeURI(doi),abstract:cleanText(item.abstract||''),abstract_source:'Crossref',pdf_urls:(item.link||[]).filter(x=>x['content-type']==='application/pdf').map(x=>publicDocumentUrl(x.URL)).filter(Boolean).slice(0,2),publication_status:item.type==='posted-content'?'preprint':['journal-article','proceedings-article'].includes(item.type)&&item['container-title']?.length?'published':'unknown',versions:[doi,...versions],source:'Crossref',status:'pending'};
+  return {title,doi,...dateInfo,authors:(item.author||[]).map(x=>[x.given,x.family].filter(Boolean).join(' ')).filter(Boolean),year:Number.isInteger(date[0])?date[0]:null,publication_date:dateText,first_publication_date:dateText,date_precision:date.length===3?'day':date.length===2?'month':date.length===1?'year':'unknown',date_source:dateRecord?.key||'未核验',issue_year:item.issued?.['date-parts']?.[0]?.[0]||null,volume:cleanText(item.volume||''),issue:cleanText(item.issue||''),journal:cleanText(item['container-title']?.[0]||''),url:publicDocumentUrl(item.resource?.primary?.URL)||publicDocumentUrl(item.URL)||'https://doi.org/'+encodeURI(doi),abstract:cleanText(item.abstract||''),abstract_source:'Crossref',pdf_urls:(item.link||[]).filter(x=>x['content-type']==='application/pdf'||/\.pdf(?:[?#]|$)/i.test(x.URL||'')).map(x=>publicDocumentUrl(x.URL)).filter(Boolean).slice(0,8),landing_urls:[publicDocumentUrl(item.resource?.primary?.URL)].filter(Boolean),publication_status:item.type==='posted-content'?'preprint':['journal-article','proceedings-article'].includes(item.type)&&item['container-title']?.length?'published':'unknown',versions:[doi,...versions],source:'Crossref',status:'pending'};
 }
 function parseObject(value) {
   if(typeof value!=='string')throw new Error('模型未返回可读取的结构化内容。');
@@ -112,7 +113,7 @@ function researchContext(scope={}) {
   return context;
 }
 
-export function createBrowserApi({store=createDirectoryWorkspaceStore({fallbackStore:indexedDbStore()}),fetchImpl=globalThis.fetch?.bind(globalThis),cryptoImpl=globalThis.crypto,onChange=()=>{},lockManager=globalThis.navigator?.locks,extractPdf=async (file,options)=>(await import('./pdf-reference.js?v=20261023-core1')).extractReferencePdf(file,options)}={}) {
+export function createBrowserApi({store=createDirectoryWorkspaceStore({fallbackStore:indexedDbStore()}),fetchImpl=globalThis.fetch?.bind(globalThis),cryptoImpl=globalThis.crypto,onChange=()=>{},lockManager=globalThis.navigator?.locks,extractPdf=async (file,options)=>(await import('./pdf-reference.js?v=20261023-search2')).extractReferencePdf(file,options)}={}) {
   let workspace=emptyWorkspace(),config=null,saveQueue=Promise.resolve(),running=null,pendingAdmission=false,persistenceFailure=false,initializationError=null;
   let storageInfo={kind:'browser',supported:false,selected:false,name:'',path_notice:'浏览器 IndexedDB；尚未绑定本地长期保存目录。',permission:'granted',needs_reconnect:false};
   const controllers=new Map(),locks=lockManager;
@@ -263,21 +264,24 @@ export function createBrowserApi({store=createDirectoryWorkspaceStore({fallbackS
       if(previous&&!candidate.revision_paper_id){recoverOrExclude(job,candidate,previous);await save();continue;}
     }
     const available=checkpoint.candidates.filter(x=>x.status==='pending');
-    for(let offset=0;offset<available.length;offset+=20){
+    for(const candidate of available)if(candidate.revision_paper_id)Object.assign(candidate,{relevance_reason:'用户指定补读已有记录',relevance_score:1,relevance_class:'direct',relevance_version:SEARCH_VERSION});
+    const unchecked=available.filter(p=>p.relevance_version!==SEARCH_VERSION);
+    for(let offset=0;offset<unchecked.length;offset+=20){
       if(targetReached(job))break;
-      const group=available.slice(offset,offset+20);await stage(job,'筛选相关性');
-      const selected=await model('依据课题实质相关性筛选候选，只选择能直接回答研究问题或提供适用方法的论文。不要为达到数量纳入弱相关结果。先判断相关性，再在相关候选中优先较新且正式发表的条目。返回 {"selected":[{"index":0,"reason":"与课题的具体联系","score":0.9}],"excluded":[{"index":1,"reason":"排除理由"}]}。index 是所给数组索引，score 在0至1。',{scope:researchContext(checkpoint.scope_snapshot),candidates:group.map((p,index)=>({index,title:p.title,abstract:p.abstract,year:p.year,publication_status:p.publication_status}))},signal);
-      if(!Array.isArray(selected.selected))throw new Error('相关性筛选缺少有效 selected 数组，未把模型格式错误当作全部排除。');
-      const picks=new Map();for(const row of selected.selected){if(Number.isInteger(row.index)&&row.index>=0&&row.index<group.length&&typeof row.reason==='string'&&row.reason.trim()&&Number.isFinite(row.score)&&row.score>=0.7&&row.score<=1)picks.set(row.index,row);}
-      group.forEach((candidate,index)=>{if(candidate.revision_paper_id)picks.set(index,{score:1,reason:'用户指定补读已有记录'});});
-      const excluded=new Map((Array.isArray(selected.excluded)?selected.excluded:[]).filter(x=>Number.isInteger(x.index)).map(x=>[x.index,text(x.reason)]));
-      const ordered=group.map((p,index)=>({p,index,row:picks.get(index)})).sort((a,b)=>(b.row?.score||0)-(a.row?.score||0)||(b.p.publication_status==='published')-(a.p.publication_status==='published')||(b.p.year||0)-(a.p.year||0));
-      for(const {p,index,row} of ordered){
-        checkAbort(signal);if(!row){p.status='excluded';p.reason=excluded.get(index)||'未被筛为高度相关候选；未进入分析。';await save();continue;}
-        p.relevance_reason=row.reason;p.relevance_score=row.score;if(targetReached(job))continue;
+      const group=unchecked.slice(offset,offset+20);await stage(job,'筛选相关性');
+      const selected=await model(SHORTLIST_PROMPT,{scope:searchTopic(checkpoint.scope_snapshot,projectById(job.project_id).name),candidates:group.map((p,index)=>({index,title:p.title,abstract:(p.abstract||'').slice(0,3000),journal:p.journal,year:p.year,publication_status:p.publication_status,fulltext_hint:{pdf_urls:(p.pdf_urls||[]).length,landing_pages:(p.landing_urls||[]).length}}))},signal);
+      const picks=selectedCandidates(selected,group),excluded=new Map((Array.isArray(selected.excluded)?selected.excluded:[]).filter(x=>Number.isInteger(x.index)).map(x=>[x.index,text(x.reason)]));
+      group.forEach((candidate,index)=>{const row=picks.get(index);candidate.relevance_version=SEARCH_VERSION;if(row)Object.assign(candidate,{relevance_reason:row.reason,relevance_score:row.score,relevance_class:row.relevance_class});else{candidate.status='excluded';candidate.reason=excluded.get(index)||'与科学问题的直接联系不足，未进入正文分析。';}});
+      await save();
+    }
+    const ordered=available.filter(p=>p.status==='pending'&&p.relevance_reason).sort(compareCandidates);
+    let attempted=0;const attemptBudget=Math.min(24,Math.max(8,job.requested*3));
+    for(const p of ordered){
+        checkAbort(signal);if(targetReached(job)||attempted>=attemptBudget)break;attempted+=1;
         await stage(job,'补充文献资料');
         if(!p.enrichment_attempted&&(!p.abstract||!(p.pdf_urls||[]).length)){try{await sources.supplement(p,signal);}catch(error){checkAbort(signal);(p.source_gaps||=[]).push(error.message);}}
         checkAbort(signal);let source=p.reading_source;
+        if(source?.basis!=='fulltext')source=null;
         if(!source){source=await sources.acquire(p,signal,{captureVisualPages:false});checkAbort(signal);if(source){source.retrieved_at=now();p.reading_source=source;}await save();}
         if(!source||source.basis!=='fulltext'){p.status='no_fulltext';p.reason='等待论文正文；摘要仅用于筛选，不计入目标新增。';p.abstract_preview=source?.blocks?.[0]?.text||p.abstract||'';await save();continue;}
         await stage(job,source.basis==='fulltext'?'生成全文文字报告':'生成摘要研究报告');
@@ -300,7 +304,6 @@ export function createBrowserApi({store=createDirectoryWorkspaceStore({fallbackS
         if(paper){recoverOrExclude(job,p,paper);await save();continue;}
         workspace.counter+=1;paper={...p,id:'D'+String(workspace.counter).padStart(3,'0'),origin_project_id:job.project_id,analysis,tags:[]};delete paper.status;workspace.papers.push(paper);
         p.status='unverified';p.paper_id=paper.id;p.reason=analysis.report_label+'已保存，可直接查看；'+(analysis.visuals.length?'部分图表有模型查看记录，未经人工复核。':'图表和公式仍待核验。');linkPaper(job.project_id,paper.id,job.id);reportCounts(job);await save();emit(job);
-      }
     }
   }
   function reportCounts(job){
@@ -346,20 +349,35 @@ export function createBrowserApi({store=createDirectoryWorkspaceStore({fallbackS
     const searches=[
       {name:'Crossref',async load(){const url=new URL('https://api.crossref.org/works');url.searchParams.set('query.bibliographic',query);url.searchParams.set('rows','40');if(from!==null)url.searchParams.set('filter',`from-pub-date:${from}-01-01`);const response=await request(url.href,{},signal,35000);if(!response.ok)throw new Error(`Crossref 检索失败（HTTP ${Number(response.status)||0}）。`);const payload=await response.json();if(!Array.isArray(payload.message?.items))throw new Error('Crossref 未返回可靠候选数组。');return payload.message.items.map(metadata).filter(Boolean);}},
       {name:'OpenAlex',load:()=>sources.discover(query,from,signal)},
-    ].filter(source=>!attempts.includes(source.name+':'+rangeKey+':'+query));
+    ].filter(source=>!attempts.includes(SEARCH_VERSION+':'+source.name+':'+rangeKey+':'+query));
     const results=await Promise.allSettled(searches.map(source=>source.load()));checkAbort(signal);
     for(let index=0;index<results.length;index++){
       const source=searches[index],result=results[index];if(result.status==='rejected'){checkpoint.diagnostics.push(source.name+'：'+result.reason.message);checkpoint.search_log.push({query,from_year:from||'全部年份',found:0,new_candidates:0,retrieved_at:now(),source:source.name,error:result.reason.message});continue;}
-      let added=0,enriched=0;for(const item of result.value){const prior=checkpoint.candidates.find(x=>samePaper(x,item));if(prior){const hadAbstract=Boolean(prior.abstract),oldUrls=new Set(prior.pdf_urls||[]);mergeSourcePaper(prior,item);enriched+=1;if(prior.status==='no_fulltext'&&((!hadAbstract&&prior.abstract)||(prior.pdf_urls||[]).some(url=>!oldUrls.has(url))))prior.status='pending';}else{checkpoint.candidates.push(item);added+=1;}}
-      checkpoint.search_log.push({query,from_year:from||'全部年份',found:result.value.length,new_candidates:added,enriched,retrieved_at:now(),source:source.name});attempts.push(source.name+':'+rangeKey+':'+query);
+      let added=0,enriched=0;for(const item of result.value){const prior=checkpoint.candidates.find(x=>samePaper(x,item));if(prior){const oldUrls=new Set(prior.pdf_urls||[]),oldLanding=new Set(prior.landing_urls||[]);mergeSourcePaper(prior,item);enriched+=1;if(prior.status==='no_fulltext'&&((prior.pdf_urls||[]).some(url=>!oldUrls.has(url))||(prior.landing_urls||[]).some(url=>!oldLanding.has(url))))prior.status='pending';}else{checkpoint.candidates.push(item);added+=1;}}
+      checkpoint.search_log.push({query,from_year:from||'全部年份',found:result.value.length,new_candidates:added,enriched,retrieved_at:now(),source:source.name});attempts.push(SEARCH_VERSION+':'+source.name+':'+rangeKey+':'+query);
     }
     if(searches.length)await save();
+  }
+  async function ensureSearchPlan(job,signal){
+    const checkpoint=job.checkpoint,project=projectById(job.project_id),topic=searchTopic(checkpoint.scope_snapshot,project.name),scopeKey=JSON.stringify(topic);
+    if(checkpoint.search_plan?.version===SEARCH_VERSION&&checkpoint.search_plan.scope_key===scopeKey)return checkpoint.search_plan.queries.map(row=>row.query);
+    let plan=project.search_plan?.version===SEARCH_VERSION&&project.search_plan.scope_key===scopeKey?clone(project.search_plan):null;
+    if(!plan){
+      await stage(job,'规划中英文检索');
+      let proposed;try{proposed=await model(SEARCH_PLAN_PROMPT,{task:'search-plan',topic},signal);}catch(error){checkAbort(signal);if(!/JSON|结构/.test(error.message))throw error;checkpoint.diagnostics.push('检索式规划格式不可用，使用已确认主题检索。');}
+      plan={...normalizeSearchPlan(proposed,searchQueries(checkpoint.scope_snapshot,project.name)),scope_key:scopeKey,created_at:now()};
+      project.search_plan=clone(plan);
+    }
+    if(checkpoint.search_strategy_version!==SEARCH_VERSION){
+      for(const candidate of checkpoint.candidates)if(!candidate.paper_id&&['excluded','no_fulltext'].includes(candidate.status)){candidate.status='pending';if(candidate.reading_source?.basis==='abstract')delete candidate.reading_source;}
+    }
+    checkpoint.search_plan=clone(plan);checkpoint.search_strategy_version=SEARCH_VERSION;await save();return plan.queries.map(row=>row.query);
   }
   async function run(job){
     const controller=new AbortController();controllers.set(job.id,controller);running=job.id;localRuns.add(LOCK);
     try{
       requireConfig();job.status='running';job.error='';job.cancel_requested=false;await stage(job,'检索');
-      const checkpoint=job.checkpoint,scope=checkpoint.scope_snapshot,queries=searchQueries(scope,projectById(job.project_id).name);checkpoint.search_queries=queries;reportCounts(job);
+      const checkpoint=job.checkpoint,scope=checkpoint.scope_snapshot,queries=job.revision_only?[]:await ensureSearchPlan(job,controller.signal);checkpoint.search_queries=queries;reportCounts(job);
       if(checkpoint.candidates.some(c=>c.status==='pending'))await analyzeCandidates(job,controller.signal);
       const year=new Date().getUTCFullYear(),ranges=[year-2,year-5,null];
       for(const from of (job.revision_only?[]:ranges)){
@@ -367,10 +385,9 @@ export function createBrowserApi({store=createDirectoryWorkspaceStore({fallbackS
         for(const query of queries){if((checkpoint.core_reports||0)>=job.requested)break;await stage(job,'检索');await searchRange(job,query,from,controller.signal);await analyzeCandidates(job,controller.signal);}
       }
       checkAbort(controller.signal);reportCounts(job);
-      if(job.reports_generated>0&&checkpoint.synthesis?.status!=='completed')await synthesize(job,controller.signal);
-      checkAbort(controller.signal);job.status=targetReached(job)?'completed':'waiting_sources';job.stage=job.status==='completed'?'完成':'等待资料';checkpoint.diagnostics.push(`已新增 ${job.core_reports}/${job.requested} 篇正文核心报告。摘要保留在资料面板；等待补充正文或调整检索范围。`);
+      checkAbort(controller.signal);checkpoint.search_diagnosis=searchDiagnosis(job);job.status=targetReached(job)?'completed':'waiting_sources';job.stage=job.status==='completed'?'完成':'等待资料';checkpoint.diagnostics.push(`已新增 ${job.core_reports}/${job.requested} 篇正文核心报告。摘要保留在资料面板；等待补充正文或调整检索范围。`);
     }catch(error){job.status=controller.signal.aborted?'cancelled':'failed';job.stage=controller.signal.aborted?'已取消':'已中断';job.error=controller.signal.aborted?'已取消；已保存的研究报告与检索记录保留。':error.message;}
-    finally{reportCounts(job);job.updated_at=now();try{await save();}catch{job.status='failed';job.stage='保存失败';job.persistence_error=true;job.error='浏览器存储失败，部分结果只保留在当前页面内存。请勿刷新，先导出备份，再检查存储权限或空间。';}controllers.delete(job.id);if(running===job.id)running=null;localRuns.delete(LOCK);emit(job);}
+    finally{reportCounts(job);job.checkpoint.search_diagnosis=searchDiagnosis(job);job.updated_at=now();try{await save();}catch{job.status='failed';job.stage='保存失败';job.persistence_error=true;job.error='浏览器存储失败，部分结果只保留在当前页面内存。请勿刷新，先导出备份，再检查存储权限或空间。';}controllers.delete(job.id);if(running===job.id)running=null;localRuns.delete(LOCK);emit(job);}
   }
   async function launch(makeJob){
     requireConfig();if(!locks)throw new Error('当前浏览器不支持安全的跨标签页任务锁，已阻止运行以保护研究库。请使用支持 Web Locks 的现代浏览器，或切换私人后台模式。');if(running||localRuns.has(LOCK))throw new Error('当前已有浏览器分析批次，请先完成或取消。');
@@ -387,7 +404,7 @@ export function createBrowserApi({store=createDirectoryWorkspaceStore({fallbackS
   function sourceFor(paper){const a=paper.analysis||{},source=paper.reading_source||{},blocks=a.source_blocks||source.blocks||(paper.abstract?[{id:'ABSTRACT-1',page:null,locator:(paper.abstract_source||paper.source)+' abstract',text:paper.abstract}]:[]),checked=[...new Set((a.visuals||[]).filter(row=>row?.inspection_status==='verified'&&row.inspection_method==='vision_model'&&row.inspection_id).map(row=>row.page))];return {notice:checked.length?`实际获取的来源文字；仅 PDF 第 ${checked.join('、')} 页有保存的图像模型查看记录，未经人工复核；其他图表与公式未核验。`:'实际获取的来源文字；原图、表格与公式尚未视觉核验。',basis:a.source_basis||source.basis||'abstract',blocks:clone(blocks),source_url:a.source_metadata?.url||source.url||paper.url,coverage:clone(a.coverage||{}),sha256:a.source_metadata?.sha256||source.sha256||null};}
   function candidateDetail(job,index){const candidate=job.checkpoint.candidates[index];if(!candidate)throw new Error('候选不存在。');const paper=workspace.papers.find(x=>x.id===candidate.paper_id),source=sourceFor(paper||candidate),checked=[...new Set((paper?.analysis?.visuals||[]).filter(row=>row?.inspection_status==='verified'&&row.inspection_method==='vision_model').map(row=>row.page))];return {candidate:clone(candidate),analysis:paper?clone(paper.analysis):candidate.analysis?clone(candidate.analysis):null,reading_notes:[],notice:(paper?.analysis?.verification_status||'候选题录；原图、表格与公式尚未视觉核验')+'；未执行外部阅读技能。',artifacts:{pdf_available:false,source_available:Boolean(source.blocks.length),image_pages:checked,checked_visual_pages:checked}};}
   function exportBundle(project){
-    const jobs=workspace.jobs.filter(j=>j.project_id===project.id).map(j=>({id:j.id,mode:'direct',trigger_source:j.trigger_source||'manual',project_id:j.project_id,requested:j.requested,status:j.status,stage:j.stage,created_at:j.created_at,updated_at:j.updated_at,core_reports:j.core_reports||0,drafts_analyzed:j.drafts_analyzed||0,reports_generated:j.reports_generated??j.drafts_analyzed??0,fulltext_reports:j.fulltext_reports||0,abstract_reports:j.abstract_reports??j.drafts_analyzed??0,error:j.error||'',persistence_error:Boolean(j.persistence_error),checkpoint:{scope_snapshot:clone(j.checkpoint.scope_snapshot||{}),candidates:clone(j.checkpoint.candidates||[]),completed:clone(j.checkpoint.completed||[]),core_reports:j.core_reports||0,reused:clone(j.checkpoint.reused||[]),drafts_analyzed:j.checkpoint.drafts_analyzed||0,reports_generated:j.reports_generated??j.drafts_analyzed??0,report_shortfall:Math.max(0,j.requested-(j.core_reports||0)),draft_shortfall:Math.max(0,j.requested-(j.core_reports||0)),search_log:clone(j.checkpoint.search_log||[]),diagnostics:clone(j.checkpoint.diagnostics||[]),synthesis:clone(j.checkpoint.synthesis||null),synthesis_history:clone(j.checkpoint.synthesis_history||[])}}));
+    const jobs=workspace.jobs.filter(j=>j.project_id===project.id).map(j=>({id:j.id,mode:'direct',trigger_source:j.trigger_source||'manual',project_id:j.project_id,requested:j.requested,status:j.status,stage:j.stage,created_at:j.created_at,updated_at:j.updated_at,core_reports:j.core_reports||0,drafts_analyzed:j.drafts_analyzed||0,reports_generated:j.reports_generated??j.drafts_analyzed??0,fulltext_reports:j.fulltext_reports||0,abstract_reports:j.abstract_reports??j.drafts_analyzed??0,error:j.error||'',persistence_error:Boolean(j.persistence_error),checkpoint:{scope_snapshot:clone(j.checkpoint.scope_snapshot||{}),candidates:clone(j.checkpoint.candidates||[]),completed:clone(j.checkpoint.completed||[]),core_reports:j.core_reports||0,reused:clone(j.checkpoint.reused||[]),drafts_analyzed:j.checkpoint.drafts_analyzed||0,reports_generated:j.reports_generated??j.drafts_analyzed??0,report_shortfall:Math.max(0,j.requested-(j.core_reports||0)),draft_shortfall:Math.max(0,j.requested-(j.core_reports||0)),search_plan:clone(j.checkpoint.search_plan||null),search_diagnosis:clone(j.checkpoint.search_diagnosis||null),search_log:clone(j.checkpoint.search_log||[]),diagnostics:clone(j.checkpoint.diagnostics||[]),synthesis:clone(j.checkpoint.synthesis||null),synthesis_history:clone(j.checkpoint.synthesis_history||[])}}));
     return {schema_version:2,mode:'direct',notice:'每篇报告标明实际来源与逐项核验范围；图像模型核验未经人工复核，未执行外部技能。参考 PDF 仅提取文字用于研究范围。导出含私人参考文字，请自行保管。',project:{id:project.id,name:project.name,goal:project.goal,scope:clone(projectView(project).scope),created_at:project.created_at},references:clone(referencesFor(project.id)),papers:clone(papersFor(project.id)),jobs};
   }
   const exportMarkdown=bundle=>exportResearchMarkdown(bundle);

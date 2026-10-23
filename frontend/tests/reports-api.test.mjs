@@ -18,6 +18,7 @@ async function setup({pdfFails=false,failAnalysis=false,openalexOnly=false,unrea
     if(String(url).startsWith('https://api.openalex.org'))return Response.json({results:[openalex()]});
     if(String(url).startsWith('https://papers.example/')){if(pdfFails)throw new Error('Blocked by CORS');return new Response(new TextEncoder().encode('%PDF-1.7 synthetic PDF bytes'));}
     const request=JSON.parse(options.body),input=JSON.parse(request.messages[1].content);
+    if(input.task==='search-plan')return answer({queries:[{query:input.topic.keywords[0]||'measurement controls',language:'en',intent:'Synthetic query fixture'}]});
     if(request.messages[0].content.includes('实质相关性筛选'))return answer({selected:input.candidates.map((_,index)=>({index,reason:'Directly tests the specified controls.',score:0.95}))});
     if(input.blocks)return answer({notes:input.blocks.map(block=>({source_block_ids:[block.id],text:block.text})),required_visual_pages:[]});
     if(gate)await gate(options.signal);if(failures-->0)return new Response('{"error":{"code":"insufficient_quota"}}',{status:429});

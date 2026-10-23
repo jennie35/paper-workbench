@@ -67,7 +67,7 @@ def safe_request(method, url, **kwargs):
     if not all(ipaddress.ip_address(a[4][0]).is_global for a in addresses):
         raise ValueError('禁止访问内部地址')
     ip = addresses[0][4][0]
-    pinned = url.replace('https://' + parsed.netloc, 'https://' + ('[' + ip + ']' if ':' in ip else ip), 1)
+    pinned = parsed._replace(scheme='https', netloc=('[' + ip + ']' if ':' in ip else ip)).geturl()
     headers = dict(kwargs.pop('headers', {}), Host=parsed.hostname)
     timeout = kwargs.pop('timeout', 180)
     # A trusted deployment proxy may resolve this fixed official host remotely.
@@ -90,7 +90,7 @@ def download(url, path):
         ip = addresses[0][4][0]
         if not all(ipaddress.ip_address(a[4][0]).is_global for a in addresses):
             raise ValueError('禁止访问内部地址')
-        pinned = url.replace('https://' + parsed.netloc, 'https://' + ('[' + ip + ']' if ':' in ip else ip), 1)
+        pinned = parsed._replace(scheme='https', netloc=('[' + ip + ']' if ':' in ip else ip)).geturl()
         try:
             with httpx.Client(timeout=45, follow_redirects=False, trust_env=False) as client:
                 with client.stream('GET', pinned, headers={'Host': parsed.hostname, 'User-Agent': 'PaperWorkbench/0.1 (research)'}, extensions={'sni_hostname': parsed.hostname.encode()}) as r:

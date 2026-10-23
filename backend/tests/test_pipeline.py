@@ -76,6 +76,7 @@ def test_no_fulltext_does_not_fill_quota(monkeypatch):
     pid,jid=project_job()
     monkeypatch.setattr('app.pipeline.search',lambda *args:([metadata()],[]))
     monkeypatch.setattr('app.pipeline.challenge_image',lambda path:None)
+    monkeypatch.setattr('app.acquisition.landing_pdf_urls', lambda meta: [])
     _run_job(jid,provider=FakeProvider(),skill=FakeSkill())
     with session() as s:
         j=s.get(Job,jid);state=json.loads(j.checkpoint)
