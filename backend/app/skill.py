@@ -1,100 +1,134 @@
-"""External Norman skill adapter; no third-party skill files are redistributed."""
-import io
+"""Portable reading tools with optional externally installed Norman instructions.
+
+No third-party skill or binary is redistributed. Built-in parsing, rendering and
+structural validation remain available on Linux without an external bridge.
+"""
+import hashlib
 import json
 import os
 from pathlib import Path
-import platform
-import subprocess
-import tempfile
-import zipfile
+import re
+import shutil
 
-import httpx
-from .config import DATA
-from .security import safe_request
-
-REFERENCES = ['reading-workflow.md', 'figure-and-equation-reading.md', 'evidence-and-research-cards.md', 'future-research-planning.md', 'output-and-brand.md', 'paper-types.md']
+REFERENCES = ['reading-workflow.md', 'figure-and-equation-reading.md',
+              'evidence-and-research-cards.md', 'future-research-planning.md',
+              'output-and-brand.md', 'paper-types.md']
 
 
 class Skill:
     def __init__(self):
         self.root = Path(os.getenv('NORMAN_SKILL_PATH', '/skill')).resolve()
-        self.bridge = os.getenv('NORMAN_BRIDGE_URL', '').rstrip('/')
-        self.token = os.getenv('NORMAN_BRIDGE_TOKEN', '')
+        self.applied = False
+        self.enhancement_available = False
+        self.native_enabled = False
+        self.native_checked = False
+        self.native = None
+
+    def _paths(self):
+        return [self.root / 'SKILL.md', *[self.root / 'references' / x for x in REFERENCES]]
 
     def instructions(self):
-        paths = [self.root / 'SKILL.md'] + [self.root / 'references' / x for x in REFERENCES]
-        if any(not p.is_file() for p in paths):
-            raise ValueError('外部 Norman 技能或适用引用缺失，请配置 NORMAN_SKILL_PATH')
-        return '\n\n'.join(p.read_text('utf-8-sig') for p in paths)
-
-    def command(self):
-        if platform.system() == 'Windows':
-            return [str(self.root / 'bin/windows-x64/norman-reader.exe')]
-        if platform.system() == 'Darwin':
-            return ['/bin/sh', str(self.root / 'bin/norman-reader')]
-        raise ValueError('当前技能原生引擎仅支持 Windows/macOS；Linux 请配置 HTTPS Norman bridge')
+        if not self.native_checked:
+            self.preflight()
+        paths = self._paths()
+        self.enhancement_available = self.native_enabled and all(path.is_file() for path in paths)
+        if not self.enhancement_available:
+            self.applied = False
+            return ('使用 Paper Workbench 内置 extend 研究流程。Norman 外部技能不可用，'
+                    '不得声称应用该技能或附加其署名。所有结论绑定正文来源，图表仅在实际图像请求后核验。')
+        content = '\n\n'.join(path.read_text('utf-8-sig') for path in paths)
+        self.applied = True
+        return content
 
     def preflight(self):
-        self.instructions()
-        if self.bridge:
-            from .security import public_url
-            public_url(self.bridge)
-            if not self.token:
-                raise ValueError('NORMAN_BRIDGE_TOKEN 缺失')
-            r = safe_request('GET', self.bridge + '/health', headers={'Authorization': 'Bearer ' + self.token}, timeout=30)
-            r.raise_for_status()
-            return r.json()
-        folder = DATA / 'engine-check'
-        folder.mkdir(parents=True, exist_ok=True)
-        self.run(['version'], folder)
-        return {'available': True, 'engine': platform.system()}
-
-    def run(self, args, cwd):
-        scratch = Path(cwd) / '.engine-tmp'
-        scratch.mkdir(parents=True, exist_ok=True)
-        env = dict(os.environ, TEMP=str(scratch.resolve()), TMP=str(scratch.resolve()))
-        result = subprocess.run(self.command() + args, cwd=cwd, env=env, capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=300)
-        if result.returncode:
-            raise ValueError('Norman 引擎失败：' + result.stdout[-1200:] + result.stderr[-600:])
-        return result.stdout
+        import pypdf  # noqa: F401
+        import pypdfium2  # noqa: F401
+        self.native_checked = True
+        self.native_enabled = False
+        rules_present = all(path.is_file() for path in self._paths())
+        if rules_present and os.getenv('NORMAN_ENABLE', 'auto').lower() not in ('0', 'false', 'off'):
+            from .norman_native import NativeNorman
+            self.native = NativeNorman()
+            try:
+                self.native.preflight()
+                self.native_enabled = True
+            except Exception:
+                # Having instructions alone does not mean its required engine works.
+                self.applied = False
+        self.enhancement_available = self.native_enabled
+        return {'available': True, 'engine': 'norman_native' if self.native_enabled else 'builtin_pypdf_pdfium',
+                'norman_available': self.enhancement_available,
+                'reading_skill': 'norman-paper-reading' if self.enhancement_available else 'paper-workbench',
+                'ocr_available': bool(shutil.which('tesseract')),
+                'notice': 'Norman 原生工具与规则可用' if self.enhancement_available else 'Norman 工具不可用或未启用，使用内置研究流程'}
 
     def operation(self, op, folder, pages=None):
         folder = Path(folder).resolve()
-        if self.bridge:
-            payload = io.BytesIO()
-            with zipfile.ZipFile(payload, 'w', zipfile.ZIP_DEFLATED) as z:
-                if op in ('extract', 'render'):
-                    z.write(folder / 'paper.pdf', 'paper.pdf')
-                else:
-                    for name in ['reading-note.md', 'evidence.json', 'source/source_map.json']:
-                        z.write(folder / name, name)
-                    for p in (folder / 'assets').glob('*.png'):
-                        z.write(p, 'assets/' + p.name)
-                    if (folder / 'assets/research-flow.svg').exists():
-                        z.write(folder / 'assets/research-flow.svg', 'assets/research-flow.svg')
-            with httpx.Client(timeout=360, trust_env=False) as c:
-                r = safe_request('POST', self.bridge + '/run', headers={'Authorization': 'Bearer ' + self.token}, data={'operation': op, 'pages': ','.join(map(str, pages or []))}, files={'bundle': ('input.zip', payload.getvalue(), 'application/zip')}, timeout=360)
-                r.raise_for_status()
-                if len(r.content) > 100 * 1024 * 1024:
-                    raise ValueError('引擎响应过大')
-                with zipfile.ZipFile(io.BytesIO(r.content)) as z:
-                    if sum(x.file_size for x in z.infolist()) > 150 * 1024 * 1024:
-                        raise ValueError('引擎解包结果过大')
-                    for info in z.infolist():
-                        target = (folder / info.filename).resolve()
-                        if not target.is_relative_to(folder) or info.file_size > 100 * 1024 * 1024:
-                            raise ValueError('无效引擎结果路径')
-                        if not info.is_dir():
-                            target.parent.mkdir(parents=True, exist_ok=True)
-                            target.write_bytes(z.read(info))
-            return
+        if not self.native_checked:
+            self.preflight()
+        if self.native_enabled:
+            self.native.operation(op, folder, pages)
+            if op == 'extract':
+                from .reading_core import heading_section
+                target = folder / 'source/source_map.json'
+                source = json.loads(target.read_text('utf-8-sig'))
+                section = 'unknown'
+                for block in source.get('blocks', []):
+                    for line in str(block.get('text', '')).splitlines():
+                        heading = heading_section(line)
+                        if heading:
+                            section = heading
+                            break
+                    block.setdefault('section', section)
+                    block.setdefault('extraction_method', 'norman_native')
+                target.write_text(json.dumps(source, ensure_ascii=False, indent=2), 'utf-8')
+            if op != 'validate':
+                return
+            # Native success still needs the application's core-evidence gate.
         if op == 'extract':
-            args = ['extract', str(folder / 'paper.pdf'), '--out', str(folder / 'source')]
+            from .artifacts import inspect_pdf
+            records = []
+            texts = inspect_pdf(folder / 'paper.pdf', page_records=records)
+            from .reading_core import sectioned_blocks
+            blocks = sectioned_blocks(texts, records)
+            source = {'schema_version': 2,
+                      'source': {'sha256': hashlib.sha256((folder / 'paper.pdf').read_bytes()).hexdigest(),
+                                 'original_file': '../paper.pdf', 'page_count': len(texts),
+                                 'extraction': 'pypdf_with_optional_tesseract'},
+                      'pages': records, 'blocks': blocks}
+            target = folder / 'source/source_map.json'
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(source, ensure_ascii=False, indent=2), 'utf-8')
         elif op == 'render':
-            args = ['render', str(folder / 'paper.pdf'), '--pages', ','.join(map(str, pages)), '--out', str(folder / 'assets')]
+            import pypdfium2 as pdfium
+            document = pdfium.PdfDocument(folder / 'paper.pdf')
+            try:
+                (folder / 'assets').mkdir(exist_ok=True)
+                for number in pages or []:
+                    if type(number) is not int or not 1 <= number <= len(document):
+                        raise ValueError('待渲染原页超出 PDF 范围')
+                    page = document[number - 1]
+                    try:
+                        scale = min(2, 1800 / max(page.get_size()))
+                        bitmap = page.render(scale=scale)
+                        try:
+                            bitmap.to_pil().save(folder / f'assets/page-{number}.png')
+                        finally:
+                            bitmap.close()
+                    finally:
+                        page.close()
+            finally:
+                document.close()
         elif op == 'validate':
-            args = ['validate', str(folder / 'reading-note.md'), '--mode', 'extend', '--evidence', str(folder / 'evidence.json'), '--source-map', str(folder / 'source/source_map.json')]
+            from .schemas import Analysis
+            from .reading_core import validate_core_report
+            analysis = json.loads((folder / 'analysis.json').read_text('utf-8-sig'))
+            source = json.loads((folder / 'source/source_map.json').read_text('utf-8-sig'))
+            Analysis.model_validate(analysis)
+            validate_core_report(analysis, source)
+            if not (folder / 'reading-note.md').is_file() or not (folder / 'evidence.json').is_file():
+                raise ValueError('研究笔记或证据文件缺失，不能完成结构校验')
+            (folder / ('builtin-validate-log.txt' if self.native_enabled else 'validate-log.txt')).write_text(
+                '内置结构、核心内容来源及文件一致性校验通过；不证明科学结论成立。', 'utf-8')
         else:
             raise ValueError('不支持的操作')
-        output = self.run(args, folder)
-        (folder / (op + '-log.txt')).write_text(output, 'utf-8')

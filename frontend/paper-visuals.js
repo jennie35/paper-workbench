@@ -14,10 +14,10 @@ const itemLabel = (type,value) => {
   return new RegExp(originalPrefixes[type]+'[（(]?'+originalNumber,'i').test(label)||(type==='equation'&&new RegExp('^[（(]?'+originalNumber+'[）)]?$','i').test(label))?label:'';
 };
 
-export function selectVisualPages(pages, limit=3) {
+export function selectVisualPages(pages, limit=300) {
   const marker=new RegExp('(?:'+Object.values(originalPrefixes).join('|')+')[（(]?'+originalNumber,'gi');
   const ranked=(Array.isArray(pages)?pages:[]).filter(row=>Number.isInteger(row?.page)&&row.page>0&&typeof row.text==='string').map(row=>({page:row.page,score:(row.text.match(marker)||[]).length})).filter(row=>row.score>0);
-  return [...new Set(ranked.sort((a,b)=>b.score-a.score||a.page-b.page).map(row=>row.page))].slice(0,Math.min(3,Math.max(0,limit))).sort((a,b)=>a-b);
+  return [...new Set(ranked.sort((a,b)=>b.score-a.score||a.page-b.page).map(row=>row.page))].slice(0,Math.min(300,Math.max(0,limit))).sort((a,b)=>a-b);
 }
 
 export function sourceImageBytes(value) {
@@ -45,7 +45,7 @@ export function stampVisualReview(payload,image,source,{model,checkedAt,inspecti
   const bytes=sourceImageBytes(image?.image_data_url);
   if(!Number.isInteger(source?.pages)||!Number.isInteger(image?.page)||image.page<1||image.page>source.pages||image.source_sha256!==source.sha256||!fingerprint(image.image_sha256)||!fingerprint(source.sha256)||!bytes||!clean(model)||!clean(inspectionId)||typeof checkedAt!=='string'||!Number.isFinite(Date.parse(checkedAt)))return [];
   const items=Array.isArray(payload?.items)?payload.items:[];
-  return items.filter(item=>item&&typeof item==='object'&&item.readable===true&&itemLabel(item.type,item.label)&&meaningful(item.explanation)).slice(0,2).map((item,index)=>{
+  return items.filter(item=>item&&typeof item==='object'&&item.readable===true&&itemLabel(item.type,item.label)&&meaningful(item.explanation)).slice(0,20).map((item,index)=>{
     const record={id:`V${image.page}-${index+1}`,type:item.type,label:itemLabel(item.type,item.label),locator:clean(item.locator)||clean(item.label),page:image.page,source_page:image.page,asset_path:`assets/page-${image.page}.${bytes.mime==='image/jpeg'?'jpg':'png'}`,image_data_url:image.image_data_url,image_sha256:image.image_sha256,source_sha256:source.sha256,source_url:source.url,inspection_status:'verified',inspection_method:'vision_model',inspection_model:clean(model),inspection_id:inspectionId,inspected_at:checkedAt,inspection_checked_at:checkedAt,inspection_note:'模型核验，未经人工复核',image_supplied:true,explanation:clean(item.explanation)};
     for(const key of ['caption','comparison','axes_units','statistical_unit','uncertainty','consistency','limitations'])record[key]=clean(item[key]);
     if(item.type==='equation')record.latex=clean(item.latex).slice(0,4000);

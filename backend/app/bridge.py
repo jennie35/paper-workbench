@@ -12,7 +12,7 @@ import zipfile
 from fastapi import FastAPI, Header, HTTPException, UploadFile, File, Form
 from fastapi.responses import Response
 
-from .skill import Skill
+from .norman_native import NativeNorman as Skill
 
 app = FastAPI(title='Norman native engine bridge', docs_url=None, redoc_url=None, openapi_url=None)
 

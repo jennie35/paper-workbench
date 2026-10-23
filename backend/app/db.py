@@ -76,6 +76,33 @@ class ProjectPaper(Base):
     analysis_json: Mapped[str] = mapped_column(Text)
 
 
+class ImportedCandidate(Base):
+    """Pending discoveries/imports are separate from the numbered research ledger."""
+    __tablename__ = 'imported_candidates'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey('projects.id'))
+    metadata_json: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default='pending')
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+
+
+class ImportPreview(Base):
+    __tablename__ = 'import_previews'
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey('projects.id'))
+    records_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+
+
+class EmbeddingCache(Base):
+    __tablename__ = 'embedding_cache'
+    fingerprint: Mapped[str] = mapped_column(String(64), primary_key=True)
+    model: Mapped[str] = mapped_column(String(250))
+    input_text: Mapped[str] = mapped_column(Text)
+    vector_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[str] = mapped_column(String(40), default=now)
+
+
 @contextmanager
 def session():
     with Session() as s:

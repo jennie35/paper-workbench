@@ -24,7 +24,7 @@ class CheckpointSkill:
     def operation(self, operation, folder, pages=None):
         if operation == 'extract':
             (folder / 'source').mkdir(exist_ok=True)
-            source = {'blocks': [{'id': 'P0001-B0001', 'page': 1, 'text': 'Synthetic source.'}]}
+            source = {'blocks': [{'id': 'P0001-B0001', 'page': 1, 'text': 'Synthetic source.', 'section': 'methods'}]}
             (folder / 'source/source_map.json').write_text(json.dumps(source), 'utf-8')
         elif operation == 'render':
             (folder / 'assets/native-page.png').write_bytes(b'synthetic-image-request-fixture')
@@ -58,7 +58,7 @@ class CheckpointProvider:
                 return {'readable': False, 'items': [], 'unread': ['Figure labels are unreadable']}
             return {'readable': True, 'items': [{'page': page, 'label': f'Figure {page}', 'kind': 'figure', 'explanation': 'Observed synthetic page', 'limitations': 'Test fixture, not research'}], 'unread': []}
         result = analysis()
-        result['required_visual_pages'] = [1]
+        result['required_visual_pages'] = sorted({1, *([self.bad_visual_page] if self.bad_visual_page else [])})
         # Untrusted model fields cannot override application verification gates.
         result.update(verified=True, structural_validation='model_claimed_success')
         if '修正此前文本分析' in prompt:
@@ -136,6 +136,6 @@ def test_validation_failure_does_not_persist_false_verified_claim(monkeypatch):
 def test_success_replaces_provisional_with_final_verified_analysis(monkeypatch):
     folder = prepared_folder(monkeypatch)
     result = analyze(CheckpointProvider(), CheckpointSkill(), metadata(), {}, folder, lambda stage: None)
-    assert result['verified'] is True and result['structural_validation'] == 'norman_native_passed'
+    assert result['verified'] is True and result['structural_validation'] == 'builtin_passed'
     assert json.loads((folder / 'analysis.json').read_text('utf-8'))['verified'] is True
     assert not (folder / 'provisional.json').exists()

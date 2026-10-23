@@ -91,7 +91,11 @@ def test_reports_preserve_analysis_and_pending_actions_without_empty_visual_sect
     assert '分析者绘制，非论文原图' in note
     assert '独立实验单位' in note and 'Stop if the baseline' in note
     assert 'Not confirmed at original reading' in note
-    assert note.count('分析采用 norman-paper-reading 技能') == 1
+    assert '未应用 norman-paper-reading' in note
+    assert '分析采用 norman-paper-reading 技能' not in note
+    a['skill_applied'] = True
+    a['reading_skill'] = 'norman-paper-reading'
+    assert markdown_note(metadata(), a).count('分析采用 norman-paper-reading 技能') == 1
     record = evidence_bundle(metadata(), a, {'blocks': [{'id': 'P0001-B0001', 'page': 1}]})
     assert record['research_logic'] == a['research_logic']
     assert record['project_context'] == a['project_context']

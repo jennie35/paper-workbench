@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createBrowserApi as implementation} from '../browser-api.js';
+import {createHash} from 'node:crypto';
 
 function fakeLocks(){
   const held=new Set(),waiting=new Map();
@@ -12,28 +13,36 @@ function fakeLocks(){
   }};
 }
 const testLocks=fakeLocks();
-const createBrowserApi=options=>implementation({lockManager:testLocks,...options});
+async function fixtureExtractPdf(file){
+  const bytes=Buffer.from(await file.arrayBuffer()),metadata=JSON.parse(bytes.toString());
+  const text_pages=[{page:1,text:`${metadata.title.replace(/<[^>]*>/g,'')}\n${metadata.doi}\nAda Example\nIntroduction: this study asks how matched protocols affect measured outcomes.`},{page:2,text:'Methods: compare matched conditions using independent experimental units and a fixed reference protocol.'},{page:3,text:'Results: the supplied fixture reports a measured difference under the stated conditions. Discussion: transfer requires matching conditions.'}];
+  return {sha256:createHash('sha256').update(bytes).digest('hex'),pages:3,text_pages,text_characters:text_pages.reduce((sum,page)=>sum+page.text.length,0),unread_pages:[],warnings:[]};
+}
+const createBrowserApi=options=>implementation({lockManager:testLocks,extractPdf:fixtureExtractPdf,...options});
 
 const SECRET='fixture-only-secret-must-not-be-exported';
 const config={base_url:'https://models.example/v1',api_key:SECRET,text_model:'fixture-text'};
 const copy=value=>JSON.parse(JSON.stringify(value));
 function memoryStore(initial=null){let value=initial;return {load:async()=>value&&copy(value),save:async data=>{value=copy(data);},snapshot:()=>copy(value)};}
 function response(value,status=200){return {ok:status>=200&&status<300,status,json:async()=>copy(value)};}
-const paper=(doi,title,abstract='Actual fixture abstract: method and finding are described here.')=>({DOI:doi,title:[title],abstract,author:[{given:'Ada',family:'Example'}],type:'journal-article','container-title':['Fixture Journal'],published:{'date-parts':[[2026,1,1]]}});
+const paper=(doi,title,abstract='Actual fixture abstract: method and finding are described here.')=>({DOI:doi,title:[title],abstract,author:[{given:'Ada',family:'Example'}],type:'journal-article','container-title':['Fixture Journal'],published:{'date-parts':[[2026,1,1]]},link:abstract?[{'content-type':'application/pdf',URL:`https://papers.example/fixture.pdf?title=${encodeURIComponent(title)}&doi=${encodeURIComponent(doi)}`}]:[]});
 function modelAnswer(value){return response({choices:[{message:{content:JSON.stringify(value)}}]});}
-function mockFetch(items,{failAnalysis=0,analysisGate=null}={}){
+function mockFetch(items,{failAnalysis=0,analysisGate=null,fulltext=true}={}){
   const calls=[];let failures=failAnalysis;
   const fetchImpl=async(url,options={})=>{
     calls.push({url:String(url),options});
-    if(String(url).startsWith('https://api.crossref.org/works'))return response({message:{items:typeof items==='function'?items(String(url)):items}});
+    if(String(url).startsWith('https://api.crossref.org/works')){const results=typeof items==='function'?items(String(url)):items;return response({message:{items:fulltext?results:results.map(item=>({...item,link:[]}))}});}
+    if(String(url).startsWith('https://papers.example/fixture.pdf')){const address=new URL(url);return new Response(JSON.stringify({title:address.searchParams.get('title'),doi:address.searchParams.get('doi')}),{headers:{'Content-Type':'application/pdf'}});}
     if(String(url).startsWith('https://api.openalex.org/works/'))return response({},404);
     if(String(url).startsWith('https://api.openalex.org/works'))return response({results:[]});
     if(String(url).endsWith('/models'))return response({data:[{id:'fixture-text'},{id:'fixture-text'},{id:'fixture-other'}]});
     const body=JSON.parse(options.body),system=body.messages[0].content,input=JSON.parse(body.messages[1].content);
     if(system.includes('实质相关性筛选'))return modelAnswer({selected:input.candidates.map((_,index)=>({index,reason:'This fixture directly addresses the specified research question.',score:0.95})),excluded:[]});
+    if(system.includes('阅读所有提供的正文块'))return modelAnswer({notes:input.blocks.map(block=>({source_block_ids:[block.id],text:block.text})),required_visual_pages:[]});
+    if(system.includes('跨论文'))return modelAnswer({supports:[],conflicts:[],judgement_changes:[],priority_actions:[],route_decisions:[],limitations:['Fixed fixture synthesis; does not raise evidence strength.']});
     if(analysisGate)await analysisGate(options.signal);
     if(failures>0){failures-=1;return response({error:{code:'insufficient_quota',message:'unsafe body '+SECRET}},429);}
-    return modelAnswer({summary:'A summary grounded in the supplied abstract.',scientific_question:'A testable question.',verified:true,skill_applied:true,visuals:[{page:1,label:'Invented figure'}],evidence:[{claim:'A limited abstract-level observation.',observation:input.paper?.abstract,source_block_ids:['MADE-UP-FULLTEXT'],limits:'Requires full text.'}],flow_steps:['Read the actual abstract','Obtain full text before checking figures'],actions:[{title:'A proposed pilot study',method:'Compare matched conditions',sample_size_basis:'n = 999 fabricated'}]});
+    return modelAnswer({summary:'A summary grounded in the supplied full text.',scientific_question:'A testable question.',verified:true,skill_applied:true,visuals:[{page:1,label:'Invented figure'}],core_coverage:{question:{summary:'How does protocol choice affect outcomes?',source_block_ids:['PDF-P1']},methods:{summary:'Compare matched independent units.',source_block_ids:['PDF-P2']},results:{summary:'A difference was reported under specified conditions.',source_block_ids:['PDF-P3']}},required_visual_pages:[],evidence:[{id:'E01',claim:'A located text observation.',observation:'The results text reports a difference under the matched protocol.',source_block_ids:['PDF-P3','MADE-UP-FULLTEXT'],limits:'Limited to the reported protocol.'}],flow_steps:['Define the research question','Compare protocols','Measure and report outcomes'],actions:[{title:'A proposed pilot study',evidence_ids:['E01','FAKE'],method:'Compare matched conditions',sample_size_basis:'n = 999 fabricated'}]});
   };
   return {calls,fetchImpl};
 }
@@ -67,13 +76,21 @@ test('reading model names uses only the configured provider and protects secret-
   const denied=createBrowserApi({store:memoryStore(),fetchImpl:async()=>response({message:SECRET},401)});await assert.rejects(denied.listModels(config),error=>error.message.includes('401')&&!error.message.includes(SECRET));
 });
 
-test('actual abstracts produce unverified drafts, never completed full readings, model-supplied verification and locators are overridden',async()=>{
-  const mock=mockFetch([paper('10.1234/actual','A real fixture title')]);const {api,project,store}=await setup(mock.fetchImpl);const queued=await start(api,project);const job=await settled(api,queued.id);
-  assert.equal(job.mode,'direct');assert.equal(job.status,'completed');assert.equal(job.drafts_analyzed,1);assert.deepEqual(job.checkpoint.completed,[]);assert.equal(job.checkpoint.draft_shortfall,0);assert.equal(job.checkpoint.candidates[0].status,'unverified');
-  const records=await api.handle(`/api/projects/${project.id}/papers`);assert.equal(records.length,1);assert.equal(records[0].id,'D001');const a=records[0].analysis;assert.equal(a.verified,false);assert.equal(a.skill_applied,false);assert.deepEqual(a.visuals,[]);assert.deepEqual(a.evidence[0].source_block_ids,['ABSTRACT-1']);assert.match(a.actions[0].sample_size_basis,/先导实验/);assert.doesNotMatch(a.actions[0].sample_size_basis,/999/);
+test('abstracts remain candidate previews and never consume a new core-report quota or a paper-analysis request',async()=>{
+  const mock=mockFetch([paper('10.1234/actual','A real fixture title')],{fulltext:false});const {api,project,store}=await setup(mock.fetchImpl);const queued=await start(api,project);const job=await settled(api,queued.id);
+  assert.equal(job.mode,'direct');assert.equal(job.status,'waiting_sources');assert.equal(job.core_reports,0);assert.equal(job.drafts_analyzed,0);assert.deepEqual(job.checkpoint.completed,[]);assert.equal(job.checkpoint.draft_shortfall,1);assert.equal(job.checkpoint.candidates[0].status,'no_fulltext');
+  const records=await api.handle(`/api/projects/${project.id}/papers`);assert.deepEqual(records,[]);assert.equal(store.snapshot().counter,0);assert.match(job.checkpoint.candidates[0].abstract_preview,/Actual fixture abstract/);
   const detail=await api.handle(`/api/jobs/${job.id}/candidates/0`);assert.equal(detail.artifacts.pdf_available,false);assert.equal(detail.artifacts.source_available,true);const source=await api.handle(`/api/jobs/${job.id}/candidates/0/source`);assert.equal(source.blocks[0].text,'Actual fixture abstract: method and finding are described here.');
-  const svg=await api.handle(`/api/papers/D001/assets/research-flow.svg`,{binary:true});assert.match(await svg.text(),/分析者绘制/);
-  for(const call of mock.calls){assert.equal(call.options.redirect,'error');if(/^https:\/\/api\.(crossref|openalex)\.org/.test(call.url))assert.equal(call.options.headers?.Authorization,undefined);else assert.equal(new URL(call.url).origin,'https://models.example');}
+  assert.equal(mock.calls.filter(call=>call.url.endsWith('/chat/completions')&&JSON.parse(JSON.parse(call.options.body).messages[1].content).paper).length,0);
+  assert.equal(JSON.stringify(store.snapshot()).includes(SECRET),false);
+});
+
+test('located full-text core reports count once while model-supplied image and skill claims stay unverified',async()=>{
+  const mock=mockFetch([paper('10.1234/core','A fulltext fixture title')]),{api,project,store}=await setup(mock.fetchImpl),job=await settled(api,(await start(api,project)).id);
+  assert.equal(job.status,'completed');assert.equal(job.core_reports,1);assert.equal(job.checkpoint.draft_shortfall,0);
+  const [record]=await api.handle(`/api/projects/${project.id}/papers`),a=record.analysis;assert.equal(record.id,'D001');assert.equal(a.report_status,'completed');assert.equal(a.verified,false);assert.equal(a.skill_applied,false);assert.deepEqual(a.visuals,[]);assert.deepEqual(a.evidence[0].source_block_ids,['PDF-P3']);assert.deepEqual(a.actions[0].evidence_ids,['E01']);assert.match(a.actions[0].sample_size_basis,/先导实验/);assert.doesNotMatch(a.actions[0].sample_size_basis,/999/);assert.equal(a.coverage.text_groups_read,a.coverage.text_groups_total);
+  const svg=await api.handle('/api/papers/D001/assets/research-flow.svg',{binary:true});assert.match(await svg.text(),/分析者绘制/);
+  for(const call of mock.calls){assert.equal(call.options.redirect,'error');if(/^https:\/\/(?:api\.(?:crossref|openalex)\.org|papers\.example)/.test(call.url))assert.equal(call.options.headers?.Authorization,undefined);else assert.equal(new URL(call.url).origin,'https://models.example');}
   assert.equal(JSON.stringify(store.snapshot()).includes(SECRET),false);
 });
 
@@ -87,9 +104,9 @@ test('unsupported report fields and absent research steps stay empty instead of 
     if(String(url).endsWith('/chat/completions')&&JSON.parse(JSON.parse(options.body).messages[1].content).paper)return modelAnswer({summary:'Only the supplied observation can be summarized.'});
     return mock.fetchImpl(url,options);
   };
-  const {api,project}=await setup(fetchImpl);await settled(api,(await start(api,project)).id);const [record]=await api.handle(`/api/projects/${project.id}/papers`);
+  const {api,project,store}=await setup(fetchImpl);const job=await settled(api,(await start(api,project)).id);assert.equal(job.status,'waiting_sources');assert.equal(job.core_reports,0);assert.deepEqual(await api.handle(`/api/projects/${project.id}/papers`),[]);const record=store.snapshot().jobs[0].checkpoint.candidates[0];
   for(const key of ['scientific_question','equipment','samples','parameters','future_insights','transfer_conditions','roadmap'])assert.equal(record.analysis[key],'',key);
-  assert.deepEqual(record.analysis.flow_steps,[]);assert.equal(record.analysis.verified,false);assert.equal(record.analysis.source_basis,'abstract');
+  assert.deepEqual(record.analysis.flow_steps,[]);assert.equal(record.analysis.verified,false);assert.equal(record.analysis.source_basis,'fulltext');assert.equal(record.analysis.report_status,'processing');
 });
 
 test('repeated runs and another project exclude stored studies without another paid analysis or a new association',async()=>{
@@ -102,7 +119,7 @@ test('repeated runs and another project exclude stored studies without another p
 test('failed analysis preserves pending candidate and resumes only unfinished work',async()=>{
   const mock=mockFetch([paper('10.1234/retry','Retry fixture')],{failAnalysis:1});const {api,project}=await setup(mock.fetchImpl);const first=await settled(api,(await start(api,project)).id);
   assert.equal(first.status,'failed');assert.match(first.error,/余额不足/);assert.equal(first.error.includes(SECRET),false);assert.equal(first.checkpoint.candidates[0].status,'pending');
-  const resumed=await api.handle(`/api/jobs/${first.id}/retry`,{method:'POST'});assert.equal(resumed.id,first.id);const final=await settled(api,first.id);assert.equal(final.status,'completed');assert.equal(final.drafts_analyzed,1);assert.equal((await api.handle(`/api/projects/${project.id}/papers`)).length,1);assert.deepEqual(final.checkpoint.completed,[]);
+  const resumed=await api.handle(`/api/jobs/${first.id}/retry`,{method:'POST'});assert.equal(resumed.id,first.id);const final=await settled(api,first.id);assert.equal(final.status,'completed');assert.equal(final.drafts_analyzed,1);assert.equal(final.core_reports,1);assert.equal((await api.handle(`/api/projects/${project.id}/papers`)).length,1);assert.deepEqual(final.checkpoint.completed,['D001']);
 });
 
 test('cancellation aborts an in-flight model request and does not register its unfinished analysis',async()=>{
@@ -134,7 +151,7 @@ test('another tab reads current checkpoints but cannot overwrite a running works
   const mock=mockFetch([paper('10.1234/tabs','Cross-tab fixture')],{analysisGate:async()=>{startedResolve();await finish;}});
   const {api,project,store}=await setup(mock.fetchImpl),other=createBrowserApi({store,fetchImpl:mock.fetchImpl});await other.configure(config);
   const job=await start(api,project);await started;
-  const current=await other.handle('/api/workspace/status');assert.equal(current.active_job.id,job.id);assert.equal(current.active_job.stage,'生成摘要研究报告');
+  const current=await other.handle('/api/workspace/status');assert.equal(current.active_job.id,job.id);assert.equal(current.active_job.stage,'生成全文文字报告');
   await assert.rejects(other.handle('/api/projects',{method:'POST',body:JSON.stringify({name:'Must not overwrite'})}),/另一个标签页正在分析/);
   await assert.rejects(other.handle(`/api/jobs/${job.id}/cancel`,{method:'POST'}),/原标签页取消/);
   await assert.rejects(start(other,project),/已有浏览器分析批次/);
@@ -165,7 +182,7 @@ test('an end-of-job storage failure stays visible in memory and can be exported 
 
 test('candidate-only shortages and search reasons remain in every export even when no analysis could run',async()=>{
   const mock=mockFetch([paper('10.1234/gap','Candidate without abstract','')]);const {api,project}=await setup(mock.fetchImpl);await settled(api,(await start(api,project)).id);
-  for(const kind of ['json','markdown','html']){const content=await (await api.handle(`/api/projects/${project.id}/export?kind=${kind}`)).text();assert.match(content,/Candidate without abstract/);assert.match(content,/补充摘要与开放全文|检索源未提供摘要/);assert.match(content,/Fixture research question/);if(kind==='json'){const bundle=JSON.parse(content);assert.equal(bundle.papers.length,0);assert.equal(bundle.jobs[0].checkpoint.draft_shortfall,1);assert.equal(bundle.jobs[0].checkpoint.search_log.length,6);}}
+  for(const kind of ['json','markdown','html']){const content=await (await api.handle(`/api/projects/${project.id}/export?kind=${kind}`)).text();assert.match(content,/Candidate without abstract/);assert.match(content,/等待论文正文|补充摘要与开放全文|检索源未提供摘要/);assert.match(content,/Fixture research question/);if(kind==='json'){const bundle=JSON.parse(content);assert.equal(bundle.papers.length,0);assert.equal(bundle.jobs[0].checkpoint.draft_shortfall,1);assert.equal(bundle.jobs[0].checkpoint.search_log.length,6);}}
 });
 
 test('cross-project version matches are skipped and wider search fills the requested number with new studies',async()=>{

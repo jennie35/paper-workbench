@@ -79,7 +79,7 @@ def test_no_fulltext_does_not_fill_quota(monkeypatch):
     _run_job(jid,provider=FakeProvider(),skill=FakeSkill())
     with session() as s:
         j=s.get(Job,jid);state=json.loads(j.checkpoint)
-        assert j.status=='completed'
+        assert j.status=='waiting_sources' and j.stage=='等待资料'
         assert state['actual']==0 and state['shortfall']==5
         assert state['candidates'][0]['status']=='no_fulltext'
         assert len(s.scalars(select(Paper)).all())==0
@@ -129,7 +129,7 @@ def test_failed_visual_analysis_never_registers(monkeypatch):
     p=metadata();p['pdf_urls']=['https://example.com/paper.pdf']
     monkeypatch.setattr('app.pipeline.search',lambda *args:([p],[]))
     monkeypatch.setattr('app.pipeline.challenge_image',lambda path:None)
-    monkeypatch.setattr('app.pipeline.download',lambda url,path:path.write_bytes(b'%PDF-fixture'))
+    monkeypatch.setattr('app.pipeline.acquire_pdf',lambda meta,path,cfg: (path.write_bytes(b'%PDF-fixture') and {'url': 'https://example.com/paper.pdf'}))
     monkeypatch.setattr('app.pipeline.inspect_pdf',lambda path:['Fixture'])
     def fail(*args):
         raise ValueError('图表未能可靠核验')
@@ -146,7 +146,7 @@ def test_success_and_retry_do_not_duplicate(monkeypatch):
     p=metadata('Unique complete paper','10.1234/complete');p['pdf_urls']=['https://example.com/paper.pdf']
     monkeypatch.setattr('app.pipeline.search',lambda *args:([p],[]))
     monkeypatch.setattr('app.pipeline.challenge_image',lambda path:None)
-    monkeypatch.setattr('app.pipeline.download',lambda url,path:path.write_bytes(b'%PDF-fixture'))
+    monkeypatch.setattr('app.pipeline.acquire_pdf',lambda meta,path,cfg: (path.write_bytes(b'%PDF-fixture') and {'url': 'https://example.com/paper.pdf'}))
     monkeypatch.setattr('app.pipeline.inspect_pdf',lambda path:['Fixture'])
     monkeypatch.setattr('app.pipeline.analyze',lambda *args:dict(analysis(),verified=True))
     _run_job(jid,provider=FakeProvider(),skill=FakeSkill())
@@ -181,7 +181,7 @@ def test_cross_project_versions_are_skipped_and_expanded_search_fills_new_quota(
         return dict(analysis(), verified=True)
     monkeypatch.setattr('app.pipeline.search', search)
     monkeypatch.setattr('app.pipeline.challenge_image', lambda path: None)
-    monkeypatch.setattr('app.pipeline.download', lambda url, path: path.write_bytes(b'%PDF-fixture'))
+    monkeypatch.setattr('app.pipeline.acquire_pdf', lambda meta, path, cfg: (path.write_bytes(b'%PDF-fixture') and {'url': 'https://example.com/paper.pdf'}))
     monkeypatch.setattr('app.pipeline.inspect_pdf', lambda path: ['Fixture'])
     monkeypatch.setattr('app.pipeline.analyze', analyze)
     _run_job(jid, provider=AllRelevant(), skill=FakeSkill())
@@ -210,7 +210,7 @@ def test_analysis_pipeline_inspects_and_reconciles_originals(omit_reconciled_log
         def operation(self,op,folder,pages=None):
             if op=='extract':
                 (folder/'source').mkdir(exist_ok=True)
-                (folder/'source/source_map.json').write_text(json.dumps({'source':{},'blocks':[{'id':'P0001-B0001','page':1,'text':'Synthetic test paper.'}]}),'utf-8')
+                (folder/'source/source_map.json').write_text(json.dumps({'source':{},'blocks':[{'id':'P0001-B0001','page':1,'text':'Synthetic test paper.', 'section':'methods'}]}),'utf-8')
             elif op=='render':
                 image=challenge_image(folder/'assets')
                 # Native renderer emits exactly one page PNG; remove probe source for clarity.
@@ -246,7 +246,7 @@ def test_analysis_pipeline_inspects_and_reconciles_originals(omit_reconciled_log
     assert model.reconciled
     assert result['verified'] is True
     assert result['coverage']['visual_pages_checked']==[1]
-    assert result['structural_validation']=='norman_native_passed'
+    assert result['structural_validation']=='builtin_passed'
     assert (folder/'assets/page-1.png').exists()
     assert '图表核验' in stages and '校验' in stages
 
@@ -313,7 +313,7 @@ def test_legacy_cross_project_links_cannot_be_recovered_as_new_papers(monkeypatc
         return dict(analysis(), verified=True, project_context={'project_id': pid})
     monkeypatch.setattr('app.pipeline.search', lambda *args: ([old, fresh], []))
     monkeypatch.setattr('app.pipeline.challenge_image', lambda path: None)
-    monkeypatch.setattr('app.pipeline.download', lambda url, path: path.write_bytes(b'%PDF-fixture'))
+    monkeypatch.setattr('app.pipeline.acquire_pdf', lambda meta, path, cfg: (path.write_bytes(b'%PDF-fixture') and {'url': 'https://example.com/paper.pdf'}))
     monkeypatch.setattr('app.pipeline.inspect_pdf', lambda path: ['Fixture'])
     monkeypatch.setattr('app.pipeline.analyze', analyze)
     _run_job(jid, provider=FakeProvider(), skill=FakeSkill())

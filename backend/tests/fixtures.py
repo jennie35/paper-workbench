@@ -5,6 +5,10 @@ def metadata(title='Test paper', doi='10.1234/example'):
 def analysis():
     return {
         'summary':'Synthetic fixture, not real research.',
+        'core_coverage': {'study_type': 'method',
+                          'question': {'summary': 'Synthetic question only', 'source_block_ids': ['P0001-B0001']},
+                          'methods': {'summary': 'Synthetic method only', 'source_block_ids': ['P0001-B0001']},
+                          'results': {'summary': 'Synthetic outcome only', 'source_block_ids': ['P0001-B0001']}},
         'research_logic': {'reading_scope': {'acquired': ['Synthetic PDF fixture'], 'verified': [], 'unverified': []}, 'study_design': {'type': 'unknown', 'fields': {'边界': 'Synthetic software fixture, not scientific results'}}},
         'scientific_question':'How can a pipeline preserve evidence?',
         'author_conclusions':'Fixture statements only.',

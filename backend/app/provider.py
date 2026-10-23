@@ -37,6 +37,8 @@ class Provider:
         self.base = public_url(config['base_url'].rstrip('/'))
 
     def json(self, prompt, images=None, system=SYSTEM):
+        if images and not self.config.get('vision_model'):
+            raise ValueError('未配置视觉模型；关键图表和公式报告保留为处理中，请配置图像模型后重试')
         content = [{'type': 'text', 'text': prompt}]
         for p in images or []:
             content.append({'type': 'image_url', 'image_url': {'url': 'data:image/png;base64,' + base64.b64encode(p.read_bytes()).decode(), 'detail': 'high'}})
@@ -73,6 +75,16 @@ class Provider:
 
     def preflight(self, image):
         text = self.json('接口测试，返回 {"ok":true}')
-        vision = self.json('读取图片中的校验码，只返回 {"code":"图片中的四位数字"}', [image])
-        if text.get('ok') is not True or vision.get('code') != '7319':
-            raise ValueError('文本或图像能力检查失败；不能启动完整精读')
+        if text.get('ok') is not True:
+            raise ValueError('文本能力检查失败；不能启动正文分析')
+        if not self.config.get('vision_model'):
+            self.capabilities = {'text': True, 'vision': False, 'vision_status': 'not_configured'}
+            return self.capabilities
+        try:
+            vision = self.json('读取图片中的校验码，只返回 {"code":"图片中的四位数字"}', [image])
+            available = vision.get('code') == '7319'
+        except (ValueError, httpx.HTTPError):
+            available = False
+        self.capabilities = {'text': True, 'vision': available,
+                             'vision_status': 'available' if available else 'unavailable'}
+        return self.capabilities

@@ -80,7 +80,8 @@ def test_private_export(logged):
         assert 'R001/assets/research-flow.svg' in z.namelist()
         assert not any('paper.pdf' in x or '.env' in x for x in z.namelist())
         note=z.read('R001/reading-note.md').decode()
-        assert note.count('分析采用 norman-paper-reading 技能')==1
+        assert '分析采用 norman-paper-reading 技能' not in note
+        assert 'Paper Workbench 内置研究流程' in note
     result=logged.get(f'/api/projects/{project["id"]}/export?kind=json')
     assert 'artifact_dir' not in result.text
 
@@ -243,9 +244,53 @@ def test_replacement_pdf_archives_provisional_analysis(logged):
     make_pdf(folder / 'paper.pdf')
     old_partial = dict(analysis(), summary='Old source partial')
     (folder / 'provisional.json').write_text(json.dumps(old_partial), 'utf-8')
-    replacement = (folder / 'paper.pdf').read_bytes() + b'\n% Revised generated fixture\n'
+    original = (folder / 'paper.pdf').read_bytes()
+    replacement = original + b'\n% Revised generated fixture\n'
     result = logged.post(f'/api/jobs/{jid}/candidates/0/pdf', files={'file': ('replacement.pdf', replacement, 'application/pdf')})
     assert result.status_code == 200
     assert not (folder / 'provisional.json').exists()
     assert len(list(folder.glob('revision-*/provisional.json'))) == 1
+    assert list(folder.glob('revision-*/paper.pdf'))[0].read_bytes() == original
+    assert (folder / 'paper.pdf').read_bytes() == replacement
     assert logged.get(f'/api/jobs/{jid}/candidates/0').json()['analysis'] is None
+
+
+def test_replacement_pdf_failure_restores_original_bundle(logged, monkeypatch):
+    from pathlib import Path
+    jid, folder = candidate_fixture(logged)
+    make_pdf(folder / 'paper.pdf')
+    original = (folder / 'paper.pdf').read_bytes()
+    old_partial = json.dumps(dict(analysis(), summary='Original source partial'))
+    (folder / 'provisional.json').write_text(old_partial, 'utf-8')
+    source = folder / 'source'
+    source.mkdir()
+    (source / 'source_map.json').write_text('{"blocks":[]}', 'utf-8')
+    replace = Path.replace
+
+    def fail_upload_replace(path, target):
+        if path.parent == folder and path.name.startswith('upload-'):
+            raise OSError('Simulated final PDF replacement failure')
+        return replace(path, target)
+
+    monkeypatch.setattr(Path, 'replace', fail_upload_replace)
+    result = logged.post(f'/api/jobs/{jid}/candidates/0/pdf', files={'file': ('replacement.pdf', original + b'\n% Replacement\n', 'application/pdf')})
+    assert result.status_code == 500
+    assert (folder / 'paper.pdf').read_bytes() == original
+    assert (folder / 'provisional.json').read_text('utf-8') == old_partial
+    assert (source / 'source_map.json').read_text('utf-8') == '{"blocks":[]}'
+    assert not list(folder.glob('revision-*/paper.pdf'))
+    assert not list(folder.glob('upload-*.pdf'))
+    assert 'fulltext_uploaded' not in logged.get(f'/api/jobs/{jid}/candidates/0').json()['candidate']
+
+
+def test_identical_candidate_pdf_keeps_existing_checkpoints(logged):
+    jid, folder = candidate_fixture(logged)
+    make_pdf(folder / 'paper.pdf')
+    original = (folder / 'paper.pdf').read_bytes()
+    checkpoint = folder / 'text-checkpoints.json'
+    checkpoint.write_text('[{"notes":"retained"}]', 'utf-8')
+    result = logged.post(f'/api/jobs/{jid}/candidates/0/pdf', files={'file': ('same.pdf', original, 'application/pdf')})
+    assert result.status_code == 200
+    assert (folder / 'paper.pdf').read_bytes() == original
+    assert checkpoint.read_text('utf-8') == '[{"notes":"retained"}]'
+    assert not list(folder.glob('revision-*'))

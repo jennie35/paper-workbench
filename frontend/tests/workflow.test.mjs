@@ -17,9 +17,9 @@ test('setup follows connection, project, scope and model without allowing demo d
   assert.equal(state().action,'batch');
 });
 
-test('configuration requires saved credentials and both trimmed model names, not merely configured flag', () => {
+test('configuration requires saved credentials and a trimmed text model, with independent optional vision', () => {
   assert.equal(configurationComplete(settings),true);
-  for (const field of ['base_url','text_model','vision_model']) {
+  for (const field of ['base_url','text_model']) {
     for (const value of ['', '   ', null, undefined]) {
       assert.equal(configurationComplete({...settings,[field]:value}),false,`${field} = ${String(value)}`);
       assert.equal(state({settings:{...settings,[field]:value}}).action,'settings');
@@ -28,6 +28,7 @@ test('configuration requires saved credentials and both trimmed model names, not
   assert.equal(configurationComplete({...settings,has_api_key:false}),false);
   assert.equal(configurationComplete({...settings,configured:false}),false);
   assert.equal(configurationComplete(null),false);
+  for(const mode of ['direct','backend'])for(const vision_model of ['',null,undefined])assert.equal(configurationComplete({...settings,mode,vision_model}),true);
 });
 
 test('inferred or empty scopes cannot launch a batch, but a confirmed question or keyword is enough', () => {
@@ -40,14 +41,14 @@ test('inferred or empty scopes cannot launch a batch, but a confirmed question o
   assert.equal(scopeConfirmed({...project,scope:{inferred:false,research_question:'',keywords:'keyword'}}),false);
 });
 
-test('direct text-only configuration can start a batch while backend still requires a visual model',()=>{
+test('text-only configuration can start a batch in either mode; required originals control completion later',()=>{
   const direct={...settings,mode:'direct',vision_model:''};
   assert.equal(configurationComplete(direct),true);
   assert.equal(state({mode:'direct',settings:direct}).action,'batch');
   assert.equal(state({mode:'direct',settings:{...settings,vision_model:''}}).action,'batch');
   assert.equal(configurationComplete({...direct,text_model:''}),false);
   assert.equal(configurationComplete({...direct,has_api_key:false}),false);
-  assert.equal(configurationComplete({...direct,mode:'backend'}),false);
+  assert.equal(configurationComplete({...direct,mode:'backend'}),true);
 });
 
 test('an instance-wide active job takes precedence even when it belongs to a different project', () => {

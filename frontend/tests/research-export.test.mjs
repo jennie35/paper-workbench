@@ -13,7 +13,7 @@ test('Markdown, evidence and HTML retain saved content and source boundaries wit
 });
 
 test('offline report cards expose saved summary and topic relevance before opening details',()=>{
-  const html=exportOfflineHtml(bundle),card=html.match(/<article class="paper-card"[\s\S]*?<\/article>/)[0],preview=card.split('<details>')[0];
+  const html=exportOfflineHtml(bundle),card=html.match(/<article[^>]*class="paper-card"[\s\S]*?<\/article>/)[0],preview=card.split('<details>')[0];
   assert.match(html,/class="paper-grid"/);assert.match(html,/grid-template-columns:repeat\(3,minmax\(0,1fr\)\)/);assert.match(html,/@media\(max-width:650px\)/);
   assert.match(preview,/Saved source summary/);assert.match(preview,/对本课题的参考借鉴/);assert.match(preview,/Use an independent reference/);assert.doesNotMatch(preview,/Actual text only|Stop if source is unavailable/);assert.match(card,/<details><summary>查看详细分析<\/summary>/);
   for(const output of [html,exportResearchMarkdown(bundle)]){assert.match(output,/目标新增 5 篇/);assert.match(output,/已新增 1 篇/);assert.doesNotMatch(output,/缺额|复用/);}
@@ -22,7 +22,7 @@ test('offline report cards expose saved summary and topic relevance before openi
 
 test('offline cards and Markdown use saved borrowing value rather than legacy no-information text',()=>{
   const legacy={id:'D003',title:'Legacy report',analysis:{summary:'A saved report',future_insights:'已提供的来源未报告足够信息,需核对原文。',research_logic:{transfer_insights:{direct:'沿用独立实验单位，帮助本课题区分技术重复与样本差异。',adapt:['先核对现有设备分辨率，再迁移校准协议。'],avoid:'该结果仅来自模拟，不能直接视为实测精度。',judgement_change:'证据不足时保留原判断。'}}}};
-  const html=exportOfflineHtml({papers:[legacy]}),preview=html.match(/<article class="paper-card"[\s\S]*?<details>/)[0],note=recordMarkdown(legacy);
+  const html=exportOfflineHtml({papers:[legacy]}),preview=html.match(/<article[^>]*class="paper-card"[\s\S]*?<details>/)[0],note=recordMarkdown(legacy);
   for(const output of [preview,note]){assert.match(output,/对本课题的参考借鉴/);assert.match(output,/沿用独立实验单位/);assert.match(output,/先核对现有设备分辨率/);assert.doesNotMatch(output,/未报告足够信息|证据不足时保留原判断|\[object Object\]/);}
   assert.match(note,/该结果仅来自模拟，不能直接视为实测精度/);
   const empty={id:'D004',title:'Unspecified value',analysis:{future_insights:'已提供的来源未报告足够信息；需核对原文。',research_logic:{transfer_insights:{direct:'未知',judgement_change:'证据不足时保留原判断'}}}};

@@ -1,9 +1,11 @@
 FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 DATA_DIR=/data FRONTEND_DIR=/app/frontend
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends libstdc++6 tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim tesseract-ocr-chi-tra && rm -rf /var/lib/apt/lists/*
 COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && useradd -m -u 10001 workbench && mkdir /data && chown workbench /data
+COPY backend/requirements-embeddings.txt .
+ARG INSTALL_EMBEDDINGS=false
+RUN pip install --no-cache-dir -r requirements.txt && if [ "$INSTALL_EMBEDDINGS" = "true" ]; then pip install --no-cache-dir -r requirements-embeddings.txt; fi && useradd -m -u 10001 workbench && mkdir /data /models && chown workbench /data /models
 COPY backend/app ./app
 COPY frontend/vendor ./frontend/vendor
 COPY frontend/math-init.js ./frontend/math-init.js

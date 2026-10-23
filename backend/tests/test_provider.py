@@ -107,3 +107,16 @@ def test_non_429_errors_preserve_generic_diagnostic(monkeypatch, mocked_provider
         provider.json('Synthetic prompt')
     assert str(caught.value) == '模型 API 请求失败（HTTP 401），请检查兼容性、配额及配置'
     assert sleeps == []
+
+
+def test_optional_vision_preflight_checks_text_without_a_fake_image_claim(monkeypatch):
+    monkeypatch.setattr('app.provider.public_url', lambda url: url)
+    provider = Provider({'base_url': 'https://example.com/v1', 'text_model': 'synthetic-text',
+                         'vision_model': '', 'api_key': 'synthetic'})
+    calls = []
+    def reply(prompt, images=None):
+        calls.append(images)
+        return {'ok': True}
+    monkeypatch.setattr(provider, 'json', reply)
+    assert provider.preflight(None) == {'text': True, 'vision': False, 'vision_status': 'not_configured'}
+    assert calls == [None]

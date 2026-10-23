@@ -14,7 +14,7 @@ export function apiOrigin(value) {
 export function configurationComplete(settings,mode=settings?.mode) {
   return Boolean(settings?.configured === true && settings?.has_api_key === true
     && nonempty(settings.base_url) && nonempty(settings.text_model)
-    && (mode==='direct'||nonempty(settings.vision_model)));
+);
 }
 
 export function scopeConfirmed(project) {
@@ -35,9 +35,9 @@ export function workflowState({demo = true, project = null, settings = null, act
   if (hasModels) {
     modelDescription = settings.preflight?.ready === true
       ? '配置完整，最近一次能力检查已通过；分析开始时会自动复查。'
-      : '配置完整；分析开始时自动检查文本、图像和阅读技能，无需另做付费检查。';
+      : '配置完整；分析开始时自动检查文本能力及可用图像工具，无需另做付费检查。';
   }
-  if(direct)modelDescription=hasModels?'文本模型已配置；启动后生成基于实际全文文字或摘要的报告。':'填写 API 地址、Key 与文本模型名，Key 仅保留在本页内存。';
+  if(direct)modelDescription=hasModels?'文本模型已配置；取得正文后生成核心报告；摘要仅用于筛选。':'填写 API 地址、Key 与文本模型名，Key 仅保留在本页内存。';
   const steps = [
     {key:'connection', label:direct?'浏览器课题库':'连接研究空间', complete:connected,
       description:connected ? direct?'课题和报告保存在当前浏览器。':'已进入私人研究空间，资料保存在此服务。' : '可直接填写模型 API，或选择高级私人后台模式。'},
@@ -55,7 +55,7 @@ export function workflowState({demo = true, project = null, settings = null, act
   } else if (!connected) {
     action = 'connect';
     title = '连接你的研究空间';
-    description = '当前为示例演示。填写模型 API 后可在浏览器中检索文献并生成报告。';
+    description = '当前为示例演示。连接私人后台以保存正文并运行研究任务，也可切换浏览器直连。';
   } else if (!hasProject) {
     action = 'create';
     title = '创建第一个课题';
@@ -67,7 +67,7 @@ export function workflowState({demo = true, project = null, settings = null, act
   } else if (!hasModels) {
     action = 'settings';
     title = '完成模型配置';
-    description = direct?'补齐 API 地址、Key 和文本模型名称。':'补齐接口地址、密钥、文本与视觉模型名，保存后即可开始分析。';
+    description = direct?'补齐 API 地址、Key 和文本模型名称。':'补齐接口地址、密钥与文本模型名，保存后即可开始分析。';
   } else {
     action = 'batch';
     title = '开始检索与分析';

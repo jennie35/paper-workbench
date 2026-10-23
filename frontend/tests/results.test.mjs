@@ -13,7 +13,7 @@ test('switching projects cannot apply an older project response to the current l
   const code=readFileSync(new URL('../app.js',import.meta.url),'utf8');
   const fn=code.slice(code.indexOf('async function loadProject()'),code.indexOf('function enterDemo()'));
   const pending=new Map(),state={demo:false,project:{id:'A'}};
-  const context=vm.createContext({state,api:path=>new Promise(resolve=>pending.set(path,resolve)),localStorage:{setItem(){}},render(){}});
+  const context=vm.createContext({loadImported:async()=>[],state,api:path=>new Promise(resolve=>pending.set(path,resolve)),localStorage:{setItem(){}},render(){}});
   vm.runInContext(fn,context);
   const first=context.loadProject();state.project={id:'B'};const second=context.loadProject();
   pending.get('/api/projects/B/papers')([{id:'B-paper'}]);pending.get('/api/projects/B/jobs')([{id:'B-job'}]);await second;
@@ -26,7 +26,7 @@ test('a registered candidate opens the official record without downgrading it to
   const fn=code.slice(code.indexOf('async function showCandidate('),code.indexOf('function connectionForm('));
   const opened=[];
   const state={papers:[{id:'R001'}],jobs:[{id:'batch',checkpoint:{candidates:[{paper_id:'R001'}]}}]};
-  const context=vm.createContext({state,showPaper:id=>opened.push(id)});
+  const context=vm.createContext({loadImported:async()=>[],state,showPaper:id=>opened.push(id)});
   vm.runInContext(fn,context);await context.showCandidate('batch',0);
   assert.deepEqual(opened,['R001']);
 });

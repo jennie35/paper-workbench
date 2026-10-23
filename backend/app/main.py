@@ -23,7 +23,7 @@ from rq import Queue, Retry
 from sqlalchemy import delete, select
 
 from .config import DATA, REDIS_URL, ALLOWED_ORIGINS, MAX_BYTES, TASK_BACKEND
-from .db import init_db, session, Project, Reference, Job, Paper, Setting, ProjectPaper, now
+from .db import init_db, session, Project, Reference, Job, Paper, Setting, ProjectPaper, ImportedCandidate, ImportPreview, now
 from .schemas import Login, ProjectInput, ProviderInput, Scope, BatchInput
 from .security import encryption, password_hash, check_password, issue_token, valid_token, public_url
 from .pipeline import configuration, safe_error
@@ -161,7 +161,7 @@ def save_settings(payload: ProviderInput):
     public_url(cfg['base_url'])
     for key, label in (('text_model', '文本模型名称'), ('vision_model', '视觉模型名称')):
         cfg[key] = cfg[key].strip()
-        if not cfg[key]:
+        if key == 'text_model' and not cfg[key]:
             raise ValueError('请填写' + label)
     with _provider_lock, session() as s:
         old = stored_configuration(s) or {}
@@ -217,13 +217,13 @@ def preflight():
             s.add(Setting(key='provider_preflight', value=record))
     try:
         skill_status = Skill().preflight()
-        Provider(cfg).preflight(challenge_image(DATA / 'probe'))
+        capabilities = Provider(cfg).preflight(challenge_image(DATA / 'probe'))
     except Exception:
         finish_preflight(fingerprint, attempt, False)
         raise
     if not finish_preflight(fingerprint, attempt, True):
         raise HTTPException(409, '检查期间配置已更改或已启动新的检查，请重新检查当前配置')
-    return {'ready': True, 'skill': skill_status, 'text': True, 'vision': True}
+    return {'ready': True, 'skill': skill_status, **(capabilities if isinstance(capabilities, dict) else {'text': True, 'vision': bool(cfg.get('vision_model'))})}
 
 
 @app.get('/api/workspace/status', dependencies=[Depends(auth)])
@@ -473,6 +473,8 @@ def delete_project(pid: str):
         s.execute(delete(ProjectPaper).where(ProjectPaper.project_id == pid))
         s.execute(delete(Job).where(Job.project_id == pid))
         s.execute(delete(Reference).where(Reference.project_id == pid))
+        s.execute(delete(ImportedCandidate).where(ImportedCandidate.project_id == pid))
+        s.execute(delete(ImportPreview).where(ImportPreview.project_id == pid))
         s.delete(project)
     # Commit first: a failed transaction must leave the original reference files
     # intact. A cleanup error cannot roll back committed records; report it plainly.
@@ -753,14 +755,24 @@ async def supply_fulltext(jid: str, index: int, file: UploadFile = File(...)):
             old = folder / 'paper.pdf'
             if old.exists() and hashlib.sha256(old.read_bytes()).digest() != hashlib.sha256(staged.read_bytes()).digest():
                 # Keep historical evidence intact; a new source receives fresh analysis.
-                import shutil
                 archive = folder / ('revision-' + str(uuid.uuid4()))
-                archive.mkdir()
-                for name in ['source', 'assets', 'source-fingerprint.json', 'text-checkpoints.json', 'visual-checkpoints.json', 'draft.json', 'provisional.json', 'reading-note.md', 'analysis.json', 'evidence.json']:
-                    p = folder / name
-                    if p.exists():
-                        shutil.move(str(p), str(archive / name))
-            staged.replace(old)
+                moved = []
+                try:
+                    for name in ['paper.pdf', 'source', 'assets', 'source-fingerprint.json', 'text-checkpoints.json', 'visual-checkpoints.json', 'draft.json', 'provisional.json', 'reading-note.md', 'analysis.json', 'evidence.json']:
+                        p = folder / name
+                        if p.exists():
+                            p.resolve().relative_to(folder.resolve())
+                            archive.mkdir(exist_ok=True)
+                            p.rename(archive / name)
+                            moved.append(name)
+                    staged.replace(old)
+                except Exception:
+                    for name in reversed(moved):
+                        if not (folder / name).exists():
+                            (archive / name).rename(folder / name)
+                    raise
+            else:
+                staged.replace(old)
             feedback = {'fulltext_uploaded': True, 'uploaded_filename': filename, 'fulltext_uploaded_at': now()}
             candidate.update(feedback)
             j.checkpoint = json.dumps(latest, ensure_ascii=False)
@@ -842,7 +854,10 @@ def paper_asset(number: int, filename: str):
     p = get_paper(number)
     if not __import__('re').fullmatch(r'(?:page-\d+\.png|research-flow\.svg)', filename):
         raise HTTPException(404, '资源不存在')
-    root = (DATA / p['analysis']['artifact_dir']).resolve()
+    relative = p['analysis'].get('artifact_dir')
+    if not isinstance(relative, str) or not relative:
+        raise HTTPException(404, '该历史记录尚未关联原始图片')
+    root = (DATA / relative).resolve()
     path = (root / 'assets' / filename).resolve()
     if not path.is_relative_to(DATA) or not path.is_file():
         raise HTTPException(404, '资源不存在')
@@ -875,7 +890,9 @@ def export(pid: str, kind: str = 'html', legacy: bool = False):
                 'source_map': read_candidate_json(root, 'source/source_map.json'),
                 'exported_binary_assets': False,
                 'notice': '保存的候选与临时分析不计入完成精读；候选 PDF 和原图未包含于导出。'})
+    from .library_routes import saved_graph_bundle
     bundle = clean_export({'schema_version': 2, 'exported_at': now(), 'project': project,
+                           'graphs': saved_graph_bundle(pid, papers),
                            'papers': papers, 'jobs': jobs, 'references': references,
                            'notice': '私人导出包含所选课题的已保存配置、参考文本、候选、检索与综合记录；不触发新的分析。原始 PDF 未包含于包内，来源与未核验状态按原记录保留。'})
     if kind == 'json':
@@ -884,6 +901,10 @@ def export(pid: str, kind: str = 'html', legacy: bool = False):
         result = bundle['papers'] if legacy else bundle
         return Response(json.dumps(result, ensure_ascii=False, indent=2), media_type='application/json', headers={'Content-Disposition': 'attachment; filename="' + ('papers.json' if legacy else 'research.json') + '"'})
     return Response(export_zip(papers, kind, DATA, bundle=bundle), media_type='application/zip', headers={'Content-Disposition': f'attachment; filename="research-{kind}.zip"'})
+
+
+from .library_routes import install_library_routes
+install_library_routes(app, auth, get_project, papers_for, save_upload, enqueue, _admission_lock, configuration)
 
 
 if os.getenv('SERVE_FRONTEND') == '1':

@@ -10,9 +10,9 @@ const metadata={model:'fixture-vision',checkedAt:'2026-10-22T09:00:00.000Z',insp
 const image=async(url=png)=>({page:2,mime:'incorrect-model-mime',image_data_url:url,image_sha256:await imageSha256(url,webcrypto),source_sha256:source.sha256});
 const item={type:'figure',label:'Figure 2',readable:true,explanation:'The visible panel compares the measured control and treatment.',comparison:'Control versus treatment',axes_units:'Time (s) and displacement (mm)'};
 
-test('visual selection ranks only pages with concrete figure, table or equation markers and caps to three unique source pages',()=>{
+test('visual selection keeps every concrete original page unless an explicit budget is supplied',()=>{
   const pages=[{page:1,text:'Article title'},{page:2,text:'Figure 1 Figure 2'},{page:3,text:'Table 1'},{page:4,text:'Equation 3 Figure 4 Figure 5'},{page:5,text:'图6与表2'}];
-  assert.deepEqual(selectVisualPages(pages),[2,4,5]);assert.deepEqual(selectVisualPages(pages,1),[4]);
+  assert.deepEqual(selectVisualPages(pages),[2,3,4,5]);assert.deepEqual(selectVisualPages(pages,1),[4]);
   assert.deepEqual(selectVisualPages([{page:1,text:'There may be figures'}]),[]);
 });
 

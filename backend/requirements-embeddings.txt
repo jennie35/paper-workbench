@@ -1,0 +1,2 @@
+# Optional local multilingual semantic graph; installed separately from the API.
+sentence-transformers>=3.4,<6

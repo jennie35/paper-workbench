@@ -14,19 +14,19 @@ function extract(start,end){
 }
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-test('connection entry defaults to direct API while explicit backend mode remains available',()=>{
+test('connection entry defaults to private backend while explicit direct mode remains available',()=>{
   const calls=[];
-  const context=vm.createContext({directConnectionForm:options=>calls.push(['direct',options]),backendConnectionForm:options=>calls.push(['backend',options])});
+  const context=vm.createContext({addPaperSourceControl(){},directConnectionForm:options=>calls.push(['direct',options]),backendConnectionForm:options=>calls.push(['backend',options])});
   vm.runInContext(extract('function connectionForm(','function directConnectionForm('),context);
   const resume=()=>{};
-  context.connectionForm();context.connectionForm({continueToBatch:true,onConnected:resume});context.connectionForm({mode:'backend',onConnected:resume});
-  assert.deepEqual(calls.map(x=>x[0]),['direct','direct','backend']);
+  context.connectionForm();context.connectionForm({continueToBatch:true,onConnected:resume});context.connectionForm({mode:'direct',onConnected:resume});
+  assert.deepEqual(calls.map(x=>x[0]),['backend','backend','direct']);
   assert.equal(calls[1][1].continueToBatch,true);assert.equal(calls[1][1].onConnected,resume);assert.equal(calls[2][1].onConnected,resume);
 });
 
 test('direct UI API calls cannot send the private-backend Bearer token or fetch its address',async()=>{
   const state={mode:'direct',demo:false,base:'https://synthetic-private-backend.invalid',token:'SYNTHETIC-BACKEND-TOKEN'},calls=[];
-  const context=vm.createContext({state,directApi:{handle:async(path,options)=>{calls.push({path,options});return {local:true};}},fetch(){throw new Error('Direct API must not fetch the private backend');},FormData:class{}});
+  const context=vm.createContext({addPaperSourceControl(){},state,directApi:{handle:async(path,options)=>{calls.push({path,options});return {local:true};}},fetch(){throw new Error('Direct API must not fetch the private backend');},FormData:class{}});
   vm.runInContext(extract('async function api(','function apiErrorMessage('),context);
   const options={method:'POST',body:'{"name":"Synthetic topic"}'};
   const response=await context.api('/api/projects',options);
@@ -36,7 +36,7 @@ test('direct UI API calls cannot send the private-backend Bearer token or fetch 
 
 test('explicit backend mode keeps authenticated backend requests working',async()=>{
   const state={mode:'backend',demo:false,base:'https://synthetic-private-backend.invalid',token:'SYNTHETIC-BACKEND-TOKEN'},calls=[];
-  const context=vm.createContext({state,FormData:class{},directApi:{handle(){throw new Error('Backend mode must not use the browser library');}},fetch:async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>({backend:true})};}});
+  const context=vm.createContext({addPaperSourceControl(){},state,FormData:class{},directApi:{handle(){throw new Error('Backend mode must not use the browser library');}},fetch:async(url,options)=>{calls.push({url,options});return {ok:true,json:async()=>({backend:true})};}});
   vm.runInContext(extract('async function api(','function apiErrorMessage('),context);
   assert.equal((await context.api('/api/projects')).backend,true);
   assert.equal(calls[0].url,'https://synthetic-private-backend.invalid/api/projects');assert.equal(calls[0].options.headers.Authorization,'Bearer SYNTHETIC-BACKEND-TOKEN');
@@ -44,7 +44,7 @@ test('explicit backend mode keeps authenticated backend requests working',async(
 
 test('direct settings opened from home stays in API settings and forwards continuation',()=>{
   const resume=()=>{},calls=[];
-  const context=vm.createContext({state:{mode:'direct',demo:false,nav:'home'},directConnectionForm:options=>calls.push(options),requireService(){throw new Error('Direct settings must not open backend login');}});
+  const context=vm.createContext({addPaperSourceControl(){},state:{mode:'direct',demo:false,nav:'home'},directConnectionForm:options=>calls.push(options),requireService(){throw new Error('Direct settings must not open backend login');}});
   vm.runInContext(extract('function settingsForm(','function batchForm('),context);
   context.settingsForm({continueToBatch:true,onComplete:resume});
   assert.equal(calls.length,1);assert.equal(calls[0].continueToBatch,true);assert.equal(calls[0].onConnected,resume);
@@ -52,7 +52,7 @@ test('direct settings opened from home stays in API settings and forwards contin
 
 function readerContext(){
   const state={mode:'direct',demo:false,view:'latest',papers:[],jobs:[]},display=[],assets=[];
-  const exportButton={addEventListener(){}},context=vm.createContext({state,esc,reportSections,hasReportContent,referenceValue,verifiedOriginals,diagramStyle,watermark:'Analysis performed using the norman-paper-reading skill | APPLIED-SIGNATURE',badge:label=>`<span>${esc(label)}</span>`,publicationLink:()=>'',tags:()=>[],showModal:(title,body)=>display.push({title,body}),renderMath(){},loadReaderAssets:async path=>assets.push(path),$:id=>id==='exportCandidate'?exportButton:null});
+  const exportButton={addEventListener(){}},context=vm.createContext({addPaperSourceControl(){},state,esc,reportSections,hasReportContent,referenceValue,verifiedOriginals,diagramStyle,watermark:'Analysis performed using the norman-paper-reading skill | APPLIED-SIGNATURE',badge:label=>`<span>${esc(label)}</span>`,publicationLink:()=>'',tags:()=>[],showModal:(title,body)=>display.push({title,body}),renderMath(){},loadReaderAssets:async path=>assets.push(path),$:id=>id==='exportCandidate'?exportButton:null});
   vm.runInContext(extract('function reportLabel(','function badge('),context);
   vm.runInContext(extract('function section(','function renderMath('),context);
   vm.runInContext(extract('async function showPaper(','async function showCandidate('),context);
@@ -100,7 +100,7 @@ function directConnectionContext(){
   const $=id=>{if(!fields.has(id))fields.set(id,{value:'',hidden:true,addEventListener(){},dataset:{},classList:{add(){},remove(){}}});return fields.get(id);};
   $('directBase').value='https://models.example/v1';$('directKey').value='SYNTHETIC-DIRECT-KEY';$('directModel').value='fixture-model';
   let visible=true,resolveModels;
-  const context=vm.createContext({state,$,esc,apiOrigin,field:()=>'',showModal(){},modalContext:()=>()=>visible,busy:handler=>handler,backendConnectionForm(){},closeModal(){},enterDemo(){},clearInterval(){},render(){},toast(){},batchForm(){},localStorage:{setItem:(key,value)=>writes.push([key,value])},loadWorkspace:async()=>events.push('load-workspace'),directApi:{getSettings:()=>({}),configure:async options=>events.push(['configure',options]),listModels:()=>new Promise(resolve=>{resolveModels=resolve;})}});
+  const context=vm.createContext({addPaperSourceControl(){},state,$,esc,apiOrigin,field:()=>'',showModal(){},modalContext:()=>()=>visible,busy:handler=>handler,backendConnectionForm(){},closeModal(){},enterDemo(){},clearInterval(){},render(){},toast(){},batchForm(){},localStorage:{setItem:(key,value)=>writes.push([key,value])},loadWorkspace:async()=>events.push('load-workspace'),directApi:{getSettings:()=>({}),configure:async options=>events.push(['configure',options]),listModels:()=>new Promise(resolve=>{resolveModels=resolve;})}});
   vm.runInContext(extract('function directConnectionForm(','function backendConnectionForm('),context);context.directConnectionForm();
   return {context,state,fields,$,writes,events,close:()=>{visible=false;},resolveModels:models=>resolveModels(models)};
 }
@@ -120,7 +120,7 @@ test('saving a direct connection remembers mode but never writes the supplied ke
 
 test('disconnecting direct API clears its memory session while retaining the browser project list',async()=>{
   const state={mode:'direct',demo:false,projects:[{id:'browser-project'}]},events=[],logout={};
-  const context=vm.createContext({state,$:id=>{assert.equal(id,'logout');return logout;},directApi:{clearSession:async()=>events.push('clear-key')},loadWorkspace:async()=>events.push('reload-browser-projects'),toast(){},enterDemo(){throw new Error('Disconnecting the key must not replace saved browser projects with demo');}});
+  const context=vm.createContext({addPaperSourceControl(){},state,$:id=>{assert.equal(id,'logout');return logout;},directApi:{clearSession:async()=>events.push('clear-key')},loadWorkspace:async()=>events.push('reload-browser-projects'),toast(){},enterDemo(){throw new Error('Disconnecting the key must not replace saved browser projects with demo');}});
   const start=code.indexOf("$('logout').onclick="),end=code.indexOf("$('help').onclick=",start);assert.ok(start>=0&&end>start);
   vm.runInContext(code.slice(start,end),context);await logout.onclick();
   assert.deepEqual(events,['clear-key','reload-browser-projects']);assert.equal(state.projects[0].id,'browser-project');assert.equal(state.demo,false);

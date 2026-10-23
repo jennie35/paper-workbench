@@ -3,15 +3,19 @@ x-app: &app
   build:
     context: .
     dockerfile: backend/Dockerfile
+    args:
+      INSTALL_EMBEDDINGS: ${INSTALL_EMBEDDINGS:-false}
   env_file: .env
   environment:
     DATABASE_URL: postgresql+psycopg://workbench:${POSTGRES_PASSWORD}@db:5432/workbench
     REDIS_URL: redis://redis:6379/0
     DATA_DIR: /data
     NORMAN_SKILL_PATH: /skill
+    HF_HOME: /models
+    EMBEDDING_CACHE_DIR: /models
   volumes:
     - research-data:/data
-    - ${NORMAN_SKILL_HOST_PATH:?Set the external skill folder}:/skill:ro
+    - model-cache:/models
   restart: unless-stopped
   depends_on:
     db:
@@ -65,3 +69,4 @@ volumes:
   research-data:
   database:
   queue:
+  model-cache:

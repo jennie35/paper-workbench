@@ -5,7 +5,7 @@ export const needsEvidence = new Set(['pending', 'no_fulltext', 'unverified']);
 export function summarizeBatch(job) {
   const checkpoint = job.checkpoint || {};
   const candidates = checkpoint.candidates || [];
-  const complete = (checkpoint.completed || []).length;
+  const complete = Number(job.core_reports??checkpoint.core_reports??(checkpoint.completed || []).length);
   const reused = (checkpoint.reused || []).length;
   const count = status => candidates.filter(item => item.status === status).length;
   return {
@@ -22,6 +22,7 @@ export function summarizeBatch(job) {
 
 export function batchOutcome(job) {
   const result = summarizeBatch(job);
+  if(job.status==='waiting_sources')return `已新增 ${result.complete}/${result.target} 篇，等待补充资料`;
   if (result.active) return job.status === 'queued' ? '等待开始' : '正在检索与分析';
   if (job.status === 'failed') return '任务中断，进度已保留';
   if (job.status === 'cancelled') return '任务已取消，进度已保留';

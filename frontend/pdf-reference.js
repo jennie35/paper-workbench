@@ -1,4 +1,4 @@
-import {selectVisualPages,imageSha256,sourceImageBytes} from './paper-visuals.js?v=20261022-visuals1';
+import {selectVisualPages,imageSha256,sourceImageBytes} from './paper-visuals.js?v=20261023-core1';
 // References default to text only. Explicit paper analysis may capture bounded
 // source page images; rendering never marks those pages visually inspected.
 const MAX_BYTES = 50 * 1024 * 1024;
@@ -108,7 +108,7 @@ export function createReferencePdfExtractor({
   timeoutMs = TIMEOUT_MS,
   canvasFactory = () => globalThis.document?.createElement('canvas'),
 } = {}) {
-  return async function extract(file, {onProgress,signal,captureVisualPages=false} = {}) {
+  return async function extract(file, {onProgress,signal,captureVisualPages=false,visualPages=null} = {}) {
     if (!file || !Number.isFinite(file.size) || typeof file.arrayBuffer !== 'function') {
       throw new ReferencePdfError('请选择一个 PDF 文件。', 'missing-file');
     }
@@ -190,7 +190,7 @@ export function createReferencePdfExtractor({
       if (failed_pages.length) warnings.push(`第 ${failed_pages.join('、')} 页解析失败；已保留其他可读取页面的文字。`);
       const page_images=[];
       if(captureVisualPages){
-        for(const pageNumber of selectVisualPages(text_pages)){
+        for(const pageNumber of (Array.isArray(visualPages)?[...new Set(visualPages)].filter(n=>Number.isInteger(n)&&n>=1&&n<=pages):selectVisualPages(text_pages))){
           ensureActive();let page,canvas,renderTask;
           const cancelRender=()=>{try{renderTask?.cancel();}catch{}if(canvas){canvas.width=0;canvas.height=0;}};
           controller.signal.addEventListener('abort',cancelRender,{once:true});

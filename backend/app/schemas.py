@@ -51,7 +51,7 @@ class ProviderInput(BaseModel):
     base_url: str
     api_key: str = ''
     text_model: str = Field(min_length=1, max_length=200)
-    vision_model: str = Field(min_length=1, max_length=200)
+    vision_model: str = Field(default='', max_length=200)
     openalex_key: str = ''
 
 
@@ -187,6 +187,19 @@ class Visual(BaseModel):
     kind: str = Field(pattern='^(figure|table|equation)$')
 
 
+class CoreSupport(BaseModel):
+    summary: str = Field(min_length=1)
+    source_block_ids: list[str] = Field(min_length=1)
+    supporting_excerpt: str = Field(default='', max_length=600)
+
+
+class CoreCoverage(BaseModel):
+    study_type: Literal['experimental', 'method', 'theory', 'review', 'dataset', 'system', 'mixed', 'unknown']
+    question: CoreSupport
+    methods: CoreSupport
+    results: CoreSupport
+
+
 class Analysis(BaseModel):
     summary: str
     scientific_question: str
@@ -213,3 +226,6 @@ class Analysis(BaseModel):
     visuals: list[Visual] = Field(default_factory=list)
     unread: list[str] = Field(default_factory=list)
     research_logic: ResearchLogic | None = None
+    # Kept optional for reading legacy records; newly completed reports must
+    # pass the application gate in reading_core.validate_core_report.
+    core_coverage: CoreCoverage | None = None

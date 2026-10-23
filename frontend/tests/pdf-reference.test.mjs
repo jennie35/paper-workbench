@@ -110,10 +110,10 @@ function renderFixture({dataUrl=sourcePng,stall=false}={}){
   return {extract,state,started};
 }
 
-test('explicit paper rendering captures at most three bounded source pages with actual image and PDF fingerprints, never inspection stamps',async()=>{
+test('explicit paper rendering captures selected bounded source pages without a three-page cap with actual image and PDF fingerprints, never inspection stamps',async()=>{
   const {extract,state}=renderFixture(),sizes=[];const source=file();
   const result=await extract(source,{captureVisualPages:true,onProgress:event=>{if(event.stage==='rendering')sizes.push(state.canvases.at(-1).width*state.canvases.at(-1).height);}});
-  assert.deepEqual(state.rendered,[2,3,4]);assert.equal(result.page_images.length,3);assert.equal(result.extraction_status,'text-with-rendered-pages');
+  assert.deepEqual(state.rendered,[2,3,4,5]);assert.equal(result.page_images.length,4);assert.equal(result.extraction_status,'text-with-rendered-pages');
   for(const image of result.page_images){assert.equal(image.source_sha256,result.sha256);assert.equal(image.image_sha256,createHash('sha256').update(Buffer.from(sourcePng.split(',')[1],'base64')).digest('hex'));assert.ok(image.width<=1400&&image.height<=1400);assert.equal(image.inspection_status,undefined);}
   assert.ok(sizes.every(pixels=>pixels<=1_600_000));assert.equal(state.destroyed,1);assert.ok(state.canvases.every(canvas=>canvas.width===0&&canvas.height===0));
   const reference=renderFixture();const textOnly=await reference.extract(file());assert.deepEqual(reference.state.rendered,[]);assert.equal(textOnly.page_images,undefined);

@@ -1,0 +1,8 @@
+# Optional external skill. docker compose -f compose.yaml -f compose.norman.yaml up -d --build
+services:
+  api:
+    volumes:
+      - ${NORMAN_SKILL_HOST_PATH:?Set the external skill folder}:/skill:ro
+  worker:
+    volumes:
+      - ${NORMAN_SKILL_HOST_PATH:?Set the external skill folder}:/skill:ro

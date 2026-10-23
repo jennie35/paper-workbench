@@ -5,8 +5,8 @@
 - 可写入的 GitHub 仓库和 Pages。
 - 可运行 Docker Compose 的服务器与后端 HTTPS 域名。
 - 文本和图像模型 API，支持 OpenAI 兼容的 chat completions 格式。
-- 外部 `norman-paper-reading` 技能目录。
-- 对于 Linux Docker：一个可以执行该技能原生引擎的 Windows/macOS 节点，通过 HTTPS 桥接。
+- 可选：外部 `norman-paper-reading` 技能目录。
+- 仅使用可选Norman原生工具时：Linux Docker需Windows/macOS桥接。基础正文报告使用内置工具。
 
 未准备好后端时，Pages 仍可作为不产生 API 开销的合成演示。部署者维护服务，浏览器用户不安装软件。
 
@@ -20,7 +20,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 
 `ALLOWED_ORIGINS` 填 `https://用户名.github.io`，不要填仓库子路径。多个来源用逗号分隔，不用 `*`。本地开发可加 `http://localhost:8080`。
 
-`NORMAN_SKILL_HOST_PATH` 填服务器上的外部技能目录，Compose 只读挂载。`NORMAN_BRIDGE_URL` 是桥接服务的 HTTPS 根地址，`NORMAN_BRIDGE_TOKEN` 在后端和桥接服务两侧必须一致。不要提交任何真实配置。
+基础Compose不挂载第三方技能。可选Norman设置 `NORMAN_SKILL_HOST_PATH`，使用 `docker compose -f compose.yaml -f compose.norman.yaml up -d --build` 只读挂载。`NORMAN_BRIDGE_URL` 是桥接服务的 HTTPS 根地址，`NORMAN_BRIDGE_TOKEN` 在后端和桥接服务两侧必须一致。不要提交任何真实配置。
 
 ```sh
 docker compose up -d --build
@@ -98,3 +98,6 @@ worker 超时或异常退出后，RQ 尝试恢复任务；重试耗尽时网页�
 - 首版使用单管理员令牌登录，令牌有效期 12 小时。需要强制结束全部会话时轮换加密密钥，同时重新保存 API 配置。
 - 管理员口令由环境配置，重启应用使新口令生效；旧登录令牌仍会存活到过期，或通过轮换加密密钥失效。
 - Pages 与后端跨域时，请确认 HTTPS、CORS origin、供应商兼容接口和桥接连接均可达。
+
+
+新版正文完成标准、扫描识别、中文导入、模型缓存与OpenAlex内容预算见[正文与图谱说明](CORE-READING.md)。

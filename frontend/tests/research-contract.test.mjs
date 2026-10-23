@@ -32,6 +32,13 @@ test('abstract-level actions require evidence acquisition before experiments and
   assert.equal(logic.actions[0].status,'pending');assert.match(logic.actions[0].prerequisites,/先取得并核对全文/);assert.doesNotMatch(logic.actions[0].sample_size_basis,/999/);assert.match(logic.actions[0].sample_size_basis,/先导实验/);assert.equal(logic.actions[0].stopping_criteria,'Stop when key evidence remains missing');assert.ok(logic.reading_priorities[0].decision_impact);assert.ok(logic.transfer_insights.adapt);
 });
 
+test('actions keep only explicitly linked, located evidence and never default to every claim',()=>{
+  const evidence=[{id:'E01',source_block_ids:['PDF-P1']},{id:'E02',source_block_ids:['PDF-P2']},{id:'E03',source_block_ids:[]}],source={basis:'fulltext',blocks:[{id:'PDF-P1'},{id:'PDF-P2'}]};
+  const logic=normalizeResearchLogic({actions:[{title:'A supported pilot',evidence_ids:['E02','E03','invented','E02']},{title:'A proposal without an asserted link'}]},{evidence},{source});
+  assert.deepEqual(logic.actions[0].evidence_ids,['E02']);assert.deepEqual(logic.actions[1].evidence_ids,[]);
+  const fallback=normalizeResearchLogic({},{evidence},{source});assert.deepEqual(fallback.actions[0].evidence_ids,[]);
+});
+
 const records=[{id:'D001',analysis:{verified:false,actions:[{id:'A01',gap:'Missing methods'}]}},{id:'D002',analysis:{verified:false,actions:[{id:'A02',gap:'Independent validation'}]}}];
 test('cross-paper synthesis rejects invented provenance, impossible action references and single-paper conflicts',()=>{
   const synthesis=normalizeSynthesis({supports:[{record_ids:['D001','FAKE'],claim:'False comparison'},{record_ids:['D001','D002'],claim:'Shared result',reason:'Comparable conditions'}],conflicts:[{record_ids:['D002'],claim:'Single-paper conflict'}],judgement_changes:[{record_ids:['D001'],before:'Unknown',after:'Needs verification',reason:'Missing methods'}],priority_actions:[{record_id:'FAKE',action_id:'A01'},{record_id:'D001',action_id:'FAKE'},{record_id:'D002',action_id:'A02',reason:'Reduce uncertainty'}],route_decisions:[{record_ids:['D001'],route:'Proposed route',decision:'already-completed'}],limitations:[]},records,{known_resources:''},'2026-10-21T00:00:00Z');

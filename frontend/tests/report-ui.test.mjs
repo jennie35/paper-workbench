@@ -10,27 +10,27 @@ const el=()=>({value:'',dataset:{},hidden:false,classList:{toggle(){}},setAttrib
 
 test('application boots against current HTML IDs without removed navigation controls',()=>{
   const html=readFileSync(new URL('../index.html',import.meta.url),'utf8'),fields=new Map([...html.matchAll(/\bid="([^"]+)"/g)].map(m=>[m[1],el()]));
-  const context=vm.createContext({document:{getElementById:id=>fields.get(id)||null,querySelectorAll:()=>[]},localStorage:{getItem:()=>null},sessionStorage:{getItem:()=>null},demoProject:{id:'demo',name:'Synthetic topic'},demoPapers:[],activeStatuses,needsEvidence,summarizeBatch,paperIdsForBatch,createBrowserApi:()=>({ready:Promise.resolve()}),setTimeout,clearTimeout});
+  const context=vm.createContext({loadProject(){},retryForm(){},api(){},renderImportedSources(){},renderProjectGraph(){},document:{getElementById:id=>fields.get(id)||null,querySelectorAll:()=>[]},localStorage:{getItem:()=>null},sessionStorage:{getItem:()=>null},demoProject:{id:'demo',name:'Synthetic topic'},demoPapers:[],activeStatuses,needsEvidence,summarizeBatch,paperIdsForBatch,createBrowserApi:()=>({ready:Promise.resolve()}),setTimeout,clearTimeout});
   assert.doesNotThrow(()=>vm.runInContext(code.replace(/^import .*;\r?\n/gm,''),context));
   assert.equal(fields.get('workspace').hidden,true);
   assert.doesNotMatch(html,/data-nav="jobs"|分析批次与结果|id="projectTabs"/);
 });
 
 test('saved candidate analyses become visible report records without duplicating registered papers',()=>{
-  const state={papers:[{id:'D001',doi:'10.1234/a',analysis:{summary:'a'}}],jobs:[{id:'first',checkpoint:{candidates:[{paper_id:'D001',doi:'10.1234/a',analysis:{summary:'duplicate'}},{doi:'10.1234/b',analysis:{summary:'b'}},{doi:'10.1234/c'},{doi:'10.1234/existing-elsewhere',status:'duplicate',analysis:{summary:'Not a new report after final identity check'}}]}},{id:'second',checkpoint:{candidates:[{doi:'10.1234/d',analysis:{summary:'d'}}]}}]};
-  const context=vm.createContext({state});vm.runInContext(extract('function reportRecords(){','function badge('),context);
+  const state={papers:[{id:'D001',doi:'10.1234/a',analysis:{summary:'a'}}],jobs:[{id:'first',checkpoint:{candidates:[{paper_id:'D001',doi:'10.1234/a',analysis:{summary:'duplicate'}},{doi:'10.1234/b',analysis:{summary:'b',report_status:'completed'}},{doi:'10.1234/c'},{doi:'10.1234/existing-elsewhere',status:'duplicate',analysis:{summary:'Not a new report after final identity check'}}]}},{id:'second',checkpoint:{candidates:[{doi:'10.1234/d',analysis:{summary:'d',report_status:'completed'}}]}}]};
+  const context=vm.createContext({loadProject(){},retryForm(){},api(){},renderImportedSources(){},renderProjectGraph(){},state});vm.runInContext(extract('function reportRecords(){','function badge('),context);
   const papers=context.reportRecords();assert.equal(papers.length,3);assert.deepEqual(Array.from(papers,p=>p.analysis.summary),['a','b','d']);assert.equal(new Set(papers.map(p=>p.id)).size,3);assert.equal(papers[1]._candidateJob,'first');
 });
 
 test('batch labels remain distinct for equal timestamps and identify each stored batch',()=>{
   const state={jobs:[{id:'bbbbbbbb-2',created_at:'2026-10-20T01:00:00Z'},{id:'aaaaaaaa-1',created_at:'2026-10-20T01:00:00Z'}]};
-  const context=vm.createContext({state});vm.runInContext(extract('function batchLabel(','function reportLabel('),context);
+  const context=vm.createContext({loadProject(){},retryForm(){},api(){},renderImportedSources(){},renderProjectGraph(){},state});vm.runInContext(extract('function batchLabel(','function reportLabel('),context);
   assert.match(context.batchLabel(state.jobs[0]),/^B002 · BBBBBBBB$/);assert.match(context.batchLabel(state.jobs[1]),/^B001 · AAAAAAAA$/);
 });
 
 test('reused reports stay readable in a batch but do not inflate its new-report count',()=>{
   const job={id:'batch',checkpoint:{reused:['D001'],completed:[]}};
-  const context=vm.createContext({paperIdsForBatch,reportRecords:()=>[{id:'D001',batch_id:'old'},{id:'D002',batch_id:'batch'}]});
+  const context=vm.createContext({loadProject(){},retryForm(){},api(){},renderImportedSources(){},renderProjectGraph(){},paperIdsForBatch,reportRecords:()=>[{id:'D001',batch_id:'old'},{id:'D002',batch_id:'batch'}]});
   vm.runInContext(extract('function batchReportCounts(','function badge('),context);
   const counts=context.batchReportCounts(job);assert.equal(counts.generated,1);assert.equal(counts.reused,1);
 });
@@ -39,7 +39,7 @@ test('unverified saved reports render in the main report list even with zero ver
   const fields=new Map(),$=id=>{if(!fields.has(id))fields.set(id,el());return fields.get(id);};
   const paper={id:'D001',batch_id:'batch',title:'Readable report',analysis:{verified:false,summary:'Actual source summary',actions:[]}};
   const job={id:'batch',checkpoint:{completed:[],reused:[]}},state={papers:[paper],jobs:[job],view:'latest',mode:'direct',demo:false};
-  const context=vm.createContext({state,$,esc:String,reportRecords:()=>[paper],renderBatchSummary(){},tags:()=>[],selectedBatch:()=>job,paperIdsForBatch,batchLabel:()=> 'B001',dateLabel:String,activeStatuses,paperCard:p=>`<article>${p.title}</article>`,renderCandidates(){},renderBatchHistory(){},renderSynthesis(){},bindResultActions(){},clearFilters(){},batchForm(){}});
+  const context=vm.createContext({loadProject(){},retryForm(){},api(){},renderImportedSources(){},renderProjectGraph(){},state,$,esc:String,reportRecords:()=>[paper],renderBatchSummary(){},tags:()=>[],selectedBatch:()=>job,paperIdsForBatch,batchLabel:()=> 'B001',dateLabel:String,activeStatuses,paperCard:p=>`<article>${p.title}</article>`,renderCandidates(){},renderBatchHistory(){},renderSynthesis(){},bindResultActions(){},clearFilters(){},batchForm(){}});
   vm.runInContext(extract('function displayAnalysis(','function batchReportCounts('),context);
   vm.runInContext(extract('function renderPapers(){','function clearFilters('),context);context.renderPapers();
   assert.match($('cards').innerHTML,/Readable report/);assert.doesNotMatch($('cards').innerHTML,/尚无完成全部核验/);assert.match($('resultCount').textContent,/1 篇文献报告/);
@@ -48,7 +48,7 @@ test('unverified saved reports render in the main report list even with zero ver
 test('cards expose reference value and recover saved transfer advice without fabricating empty fields',()=>{
   const esc=value=>String(value??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
   const state={mode:'direct',demo:false,view:'latest',jobs:[]};
-  const context=vm.createContext({state,esc,hasReportContent,referenceValue,tags:()=>[],badge:esc,reportLabel:()=> '摘要研究报告'});
+  const context=vm.createContext({loadProject(){},retryForm(){},api(){},renderImportedSources(){},renderProjectGraph(){},state,esc,hasReportContent,referenceValue,tags:()=>[],badge:esc,reportLabel:()=> '摘要研究报告'});
   vm.runInContext(extract('function displayAnalysis(','function batchReportCounts('),context);
   vm.runInContext(extract('function paperCard(','function section('),context);
   const paper={id:'D001',title:'Saved paper',analysis:{summary:'Actual finding <script>unsafe()</script>',future_insights:'Change the topic measurement protocol.',research_logic:{transfer_insights:{judgement_change:'证据不足时保留原判断'}}}};
@@ -71,16 +71,16 @@ test('cards expose reference value and recover saved transfer advice without fab
 test('batch summary reports target and actual new count without reuse or shortfall counters',()=>{
   const job={id:'batch',requested:5,status:'completed',checkpoint:{reused:['old'],completed:[]}},fields=new Map();
   const $=id=>{if(!fields.has(id))fields.set(id,el());return fields.get(id);};
-  const context=vm.createContext({state:{demo:false},$,selectedBatch:()=>job,summarizeBatch,batchReportCounts:()=>({generated:2,reused:1}),batchLabel:()=> 'B001',dateLabel:()=> '10-22',esc:String,badge:String,bindResultActions(){}});
+  const context=vm.createContext({loadProject(){},retryForm(){},api(){},renderImportedSources(){},renderProjectGraph(){},state:{demo:false},$,selectedBatch:()=>job,summarizeBatch,batchReportCounts:()=>({generated:2,reused:1}),batchLabel:()=> 'B001',dateLabel:()=> '10-22',esc:String,badge:String,bindResultActions(){}});
   vm.runInContext(extract('function renderBatchSummary(){','function directDraftCount('),context);context.renderBatchSummary();
   const html=$('batchSummary').innerHTML;
-  assert.match(html,/目标新增 5 篇/);assert.match(html,/已生成 2 篇新文献报告/);
+  assert.match(html,/目标新增 5 篇/);assert.match(html,/已新增 2\/5 篇正文报告/);
   assert.doesNotMatch(html,/复用|缺额|本批新增 5 篇/);assert.match(html,/data-retry="batch"/);
 });
 
 test('opening project deletion confirmation does not delete anything and blocks active analysis',()=>{
   const state={demo:false,project:{id:'topic',name:'A <topic>'},projects:[{id:'topic',name:'A <topic>'}]},fields=new Map(),calls=[];
-  const context=vm.createContext({state,$:id=>{if(!fields.has(id))fields.set(id,el());return fields.get(id);},esc:s=>s.replaceAll('<','&lt;').replaceAll('>','&gt;'),showModal:(title,body)=>calls.push(body),modalContext:()=>()=>true,busy:f=>f,closeModal(){},api(){throw new Error('No mutation before confirmation');},toast:message=>calls.push(message)});
+  const context=vm.createContext({loadProject(){},retryForm(){},api(){},renderImportedSources(){},renderProjectGraph(){},state,$:id=>{if(!fields.has(id))fields.set(id,el());return fields.get(id);},esc:s=>s.replaceAll('<','&lt;').replaceAll('>','&gt;'),showModal:(title,body)=>calls.push(body),modalContext:()=>()=>true,busy:f=>f,closeModal(){},api(){throw new Error('No mutation before confirmation');},toast:message=>calls.push(message)});
   vm.runInContext(extract('function deleteProjectForm(','function download('),context);context.deleteProjectForm();
   assert.equal(calls.length,1);assert.match(calls[0],/无法撤销/);assert.match(calls[0],/A &lt;topic&gt;/);assert.equal(typeof fields.get('confirmDelete').onclick,'function');
   state.activeJob={project_id:'topic'};context.deleteProjectForm();assert.match(calls[1],/先停止任务/);
@@ -88,7 +88,7 @@ test('opening project deletion confirmation does not delete anything and blocks 
 
 test('confirmed deletion removes only its project from UI and clears stale selection before reload',async()=>{
   const state={demo:false,project:{id:'A',name:'A'},projects:[{id:'A',name:'A'},{id:'B',name:'B'}],papers:[{id:'D001'}],jobs:[{id:'old'}]},fields=new Map(),calls=[];
-  const context=vm.createContext({state,$:id=>{if(!fields.has(id))fields.set(id,el());return fields.get(id);},esc:String,showModal(){},modalContext:()=>()=>true,busy:f=>f,closeModal(){},api:async(path,options)=>calls.push([path,options.method]),toast(){},resetFilters(){},localStorage:{getItem:()=> 'A',removeItem:key=>calls.push(key)},loadWorkspace:async()=>calls.push('reload')});
+  const context=vm.createContext({loadProject(){},retryForm(){},api(){},renderImportedSources(){},renderProjectGraph(){},state,$:id=>{if(!fields.has(id))fields.set(id,el());return fields.get(id);},esc:String,showModal(){},modalContext:()=>()=>true,busy:f=>f,closeModal(){},api:async(path,options)=>calls.push([path,options.method]),toast(){},resetFilters(){},localStorage:{getItem:()=> 'A',removeItem:key=>calls.push(key)},loadWorkspace:async()=>calls.push('reload')});
   vm.runInContext(extract('function deleteProjectForm(','function download('),context);context.deleteProjectForm();await fields.get('confirmDelete').onclick();
   assert.deepEqual(calls,[['/api/projects/A','DELETE'],'pw-project','reload']);assert.equal(state.projects.length,1);assert.equal(state.projects[0].id,'B');assert.equal(state.project,null);assert.equal(state.papers.length,0);assert.equal(state.jobs.length,0);assert.equal(state.nav,'home');
 });

@@ -7,6 +7,8 @@ import zipfile
 import os
 import datetime as dt
 import uuid
+import shutil
+import subprocess
 from pathlib import Path
 
 from markdown_it import MarkdownIt
@@ -19,7 +21,35 @@ from .visual_review import project_visual_evidence, report_visuals, DETAIL_FIELD
 WATERMARK = '分析采用 norman-paper-reading 技能｜作者：N同学｜小红书：N同学｜B站/抖音：耐心的N同学\nAnalysis performed using the norman-paper-reading skill | Author: N同学 | Xiaohongshu: N同学 | Bilibili/Douyin: 耐心的N同学'
 
 
-def inspect_pdf(path):
+def ocr_page(path, page):
+    """OCR an unmodified source page with fixed, non-shell Tesseract arguments."""
+    import pypdfium2 as pdfium
+    executable = shutil.which('tesseract')
+    if not executable:
+        raise ValueError('扫描页需要 OCR：请安装 Tesseract 及 chi_sim、chi_tra、eng 语言包')
+    document = pdfium.PdfDocument(path)
+    try:
+        original = document[page - 1]
+        scale = min(3, 2200 / max(original.get_size()))
+        bitmap = original.render(scale=scale)
+        try:
+            buffer = io.BytesIO()
+            bitmap.to_pil().save(buffer, format='PNG')
+        finally:
+            bitmap.close()
+            original.close()
+    finally:
+        document.close()
+    result = subprocess.run([executable, 'stdin', 'stdout', '-l', 'chi_sim+chi_tra+eng',
+                             '--oem', '1', '--psm', '3'], input=buffer.getvalue(),
+                            capture_output=True, timeout=120, check=False)
+    if result.returncode:
+        raise ValueError('扫描页 OCR 未成功，请检查 Tesseract 中英文语言包或上传更清晰正文')
+    return result.stdout.decode('utf-8', errors='replace').strip()
+
+
+def inspect_pdf(path, *, page_records=None):
+    path = Path(path)
     if path.stat().st_size > 50 * 1024 * 1024 or path.read_bytes()[:5] != b'%PDF-':
         raise ValueError('无效或超过 50 MB 的 PDF')
     try:
@@ -30,9 +60,28 @@ def inspect_pdf(path):
         raise ValueError('PDF 已加密，请提供可读取版本')
     if not 0 < len(r.pages) <= MAX_PAGES:
         raise ValueError('PDF 页数必须在 1–300 页之间')
-    texts = [p.extract_text() or '' for p in r.pages]
+    texts = []
+    for number, page in enumerate(r.pages, 1):
+        try:
+            text = page.extract_text() or ''
+        except Exception:
+            text = ''
+        method, error = 'pdf_text', ''
+        # Sparse pages can be figures or scans; OCR helps locate them but never
+        # constitutes visual inspection of a figure/table/equation.
+        if len(re.sub(r'\s', '', text)) < 40 or text.count('\ufffd') > max(2, len(text) * .05):
+            try:
+                recognized = ocr_page(path, number)
+                if len(recognized.strip()) > len(text.strip()):
+                    text, method = recognized, 'tesseract:chi_sim+chi_tra+eng:oem1:psm3'
+            except (ValueError, OSError, subprocess.TimeoutExpired) as exc:
+                error = str(exc) if isinstance(exc, ValueError) else '扫描页 OCR 超时或不可用'
+        texts.append(text)
+        if page_records is not None:
+            page_records.append({'page': number, 'method': method,
+                                 'readable': bool(text.strip()), 'notice': error})
     if sum(len(t.strip()) for t in texts) < 100:
-        raise ValueError('PDF 缺少可可靠读取的文本，扫描件需先进行 OCR')
+        raise ValueError('PDF 缺少可可靠读取的文本；扫描页 OCR 不可用或识别不足，请补充清晰正文')
     return texts
 
 
@@ -79,7 +128,8 @@ def evidence_bundle(meta, analysis, source_map):
     for i, e in enumerate(analysis['evidence'], 1):
         cid = f'C{i:02d}'
         claims.append({'id': cid, 'statement': e['claim'], 'origin': e.get('origin', 'analyst_inference'), 'caveat': e['limits']})
-        evidence.append({'id': e['id'], 'kind': 'text', 'locator': '; '.join(str(blocks[x].get('locator') or ('PDF p.' + str(blocks[x].get('page', '?')))) for x in e['source_block_ids']), 'source_ids': e['source_block_ids'], 'observation': e['observation'], 'inspection': 'verified'})
+        evidence.append({'id': e['id'], 'kind': 'text', 'locator': '; '.join(str(blocks[x].get('locator') or ('PDF p.' + str(blocks[x].get('page', '?')))) for x in e['source_block_ids']), 'source_ids': e['source_block_ids'], 'observation': e['observation'], 'inspection': 'verified',
+                         'inspection_method': 'source_text_location', 'scientific_verification': 'not_established'})
         links.append({'claim_id': cid, 'evidence_id': e['id'], 'relation': 'supports', 'strength': 'uncertain', 'rationale': e['interpretation']})
     result = {'schema_version': 1, 'paper': {'title': meta['title'], 'url': meta.get('url', ''), 'version': meta.get('publication_status', 'unknown'), 'source_sha256': analysis.get('source_sha256', ''), 'scope': analysis.get('coverage', {})}, 'claims': claims, 'evidence': evidence, 'links': links, 'branches': [], 'action_status':analysis.get('action_status',''), 'actions': [dict(id=a['id'], gap=a['gap'], question=a['title'], hypothesis=a['hypothesis'], method=a['method'], controls=a['controls'], decision_rule='支持：'+a['supporting']+'；削弱：'+a['weakening'], resources=a['resources'], feasibility='requires_resources', evidence_ids=a['evidence_ids'], priority=a['priority'], deliverable=a['deliverable']) for a in analysis['actions']]}
 
@@ -178,7 +228,11 @@ def markdown_note(meta, a):
     if not a['actions']:
         text.append(a.get('action_status', '证据不足，须先补齐资料。'))
     text.extend(['### 优先研究路线图', a['roadmap'], '### 来源与阅读记录'] + ['- ' + x for x in a['sources']])
-    text.extend(['', WATERMARK.replace('\n', '  \n')])
+    if (a.get('reading_skill') == 'norman-paper-reading'
+            and (a.get('skill_applied') is True or a.get('structural_validation') == 'norman_native_passed')):
+        text.extend(['', WATERMARK.replace('\n', '  \n')])
+    else:
+        text.extend(['', '分析使用 Paper Workbench 内置研究流程；未应用 norman-paper-reading 技能。'])
     return '\n\n'.join(text) + '\n'
 
 
@@ -310,5 +364,6 @@ def export_zip(papers, kind, data_root, *, bundle=None):
         z.writestr('research.json', json.dumps(bundle, ensure_ascii=False, indent=2))
         z.writestr('project.md', project_markdown(bundle))
         if kind == 'html':
-            z.writestr('index.html', offline_index(bundle))
+            from .graph import render_graphs_html
+            z.writestr('index.html', offline_index(bundle).replace('</body>', render_graphs_html(bundle.get('graphs')) + '</body>'))
     return stream.getvalue()

@@ -2,6 +2,8 @@ import datetime as dt
 import re
 import unicodedata
 import calendar
+import hashlib
+import json
 
 import httpx
 
@@ -15,8 +17,29 @@ def title_key(value):
     return ''.join(c for c in unicodedata.normalize('NFKC', value).casefold() if c.isalnum())
 
 
+def source_ids(paper):
+    ids = {**(paper.get('external_ids') or {}), **(paper.get('ids') or {}), **(paper.get('source_ids') or {})}
+    if paper.get('openalex_id'):
+        ids.setdefault('openalex', paper['openalex_id'])
+    if re.match(r'^https://openalex\.org/W\d+$', str(paper.get('source_id') or '')):
+        ids.setdefault('openalex', paper['source_id'])
+    return ids
+
+
 def identity(paper):
-    return 'doi:' + doi(paper['doi']) if paper.get('doi') else 'title:' + title_key(paper['title'])
+    if doi(paper.get('doi')):
+        return 'doi:' + doi(paper['doi'])
+    ids = source_ids(paper)
+    for provider in ('openalex', 'pmid', 'pmcid', 'arxiv', 'cnki', 'wanfang', 'vip'):
+        if ids.get(provider):
+            return 'source:' + provider + ':' + str(ids[provider]).strip().lower()
+    if paper.get('identity_token') and not (paper.get('authors') and paper.get('year') and paper.get('journal')):
+        return 'incomplete:' + paper['identity_token']
+    # Long CJK titles must not overflow a DB unique key. Preserve all identity
+    # constituents in metadata; hash the canonical composite, never title alone.
+    composite = [title_key(paper.get('title', '')), sorted(title_key(a) for a in paper.get('authors', [])),
+                 str(paper.get('year') or ''), title_key(paper.get('journal') or '')]
+    return 'bibliography:' + hashlib.sha256(json.dumps(composite, ensure_ascii=False).encode()).hexdigest()
 
 
 def same_paper(a, b):
@@ -25,11 +48,55 @@ def same_paper(a, b):
     aliases_b = {doi(x) for x in b.get('versions', [])} | {db}
     if (aliases_a - {''}) & (aliases_b - {''}):
         return True
-    if title_key(a['title']) != title_key(b['title']):
+    if a.get('identity_token') and a.get('identity_token') == b.get('identity_token'):
+        return True
+    ia, ib = source_ids(a), source_ids(b)
+    if any(str(ia[k]).casefold() == str(ib[k]).casefold() for k in ('openalex', 'pmid', 'pmcid', 'arxiv', 'cnki', 'wanfang', 'vip') if ia.get(k) and ib.get(k)):
+        return True
+    # Conflicting canonical DOI values are not automatically merged from a
+    # similar title. Explicit version aliases above remain supported.
+    if da and db and da != db:
+        return False
+    if title_key(a.get('title', '')) != title_key(b.get('title', '')):
+        return False
+    if a.get('year') and b.get('year') and str(a['year']) != str(b['year']):
+        return False
+    if a.get('journal') and b.get('journal') and title_key(a['journal']) != title_key(b['journal']):
         return False
     aa = {title_key(x) for x in a.get('authors', [])}
     ab = {title_key(x) for x in b.get('authors', [])}
-    return bool(aa & ab) or not (aa and ab)
+    # Incomplete records need review, not title-only identity assignment.
+    return bool(aa & ab) if aa or ab else bool(a.get('year') and a.get('journal'))
+
+
+def imported_candidates(project_id):
+    from sqlalchemy import select
+    from .db import session, ImportedCandidate
+    with session() as s:
+        return [dict(json.loads(x.metadata_json), imported_candidate_id=x.id) for x in
+                s.scalars(select(ImportedCandidate).where(ImportedCandidate.project_id == project_id, ImportedCandidate.status == 'pending')).all()]
+
+
+def openalex_paper(p):
+    loc = p.get('primary_location') or {}
+    biblio = p.get('biblio') or {}
+    inverted = p.get('abstract_inverted_index') or {}
+    words = {i: word for word, indices in inverted.items() for i in indices}
+    first, last = biblio.get('first_page') or '', biblio.get('last_page') or ''
+    return {'title': p.get('title') or p.get('display_name') or '', 'abstract': ' '.join(words[i] for i in sorted(words)),
+            'doi': doi(p.get('doi')), 'authors': [x.get('author', {}).get('display_name', '') for x in p.get('authorships', [])],
+            'year': p.get('publication_year'), 'publication_date': p.get('publication_date', ''), 'first_publication_date': '',
+            'first_publication_date_status': 'unknown', 'publication_date_status': 'source_metadata_not_independently_verified',
+            'volume': biblio.get('volume') or '', 'issue': biblio.get('issue') or '',
+            'pages': first + ('–' + last if last and last != first else ''), 'journal': (loc.get('source') or {}).get('display_name', ''),
+            'url': loc.get('landing_page_url') or p.get('doi') or p.get('id') or '',
+            'pdf_urls': list(dict.fromkeys(x['pdf_url'] for x in p.get('locations', []) if x.get('pdf_url') and x.get('is_oa') is True)),
+            'publication_status': 'published' if loc.get('is_published') is True else ('preprint' if p.get('type') == 'preprint' else 'unknown'),
+            'versions': [doi(p.get('doi'))] if p.get('doi') else [], 'source': 'OpenAlex', 'source_ids': p.get('ids') or {'openalex': p.get('id')},
+            'openalex_id': p.get('id'), 'language': p.get('language'), 'citation_count': p.get('cited_by_count'),
+            'referenced_works': p.get('referenced_works') or [], 'related_works': p.get('related_works') or [],
+            'cited_by_api_url': p.get('cited_by_api_url'), 'content_urls': p.get('content_urls') or {},
+            'has_content': p.get('has_content') or {}, 'retrieved_at': dt.datetime.now(dt.timezone.utc).isoformat()}
 
 
 def source_date(parts):
@@ -85,7 +152,7 @@ def search(query, start_year, config):
                 bibliography = crossref_bibliography(p)
                 published = p.get('type') in ('journal-article', 'proceedings-article') and bool(p.get('container-title'))
                 relations = [x.get('id', '') for key in ('is-preprint-of', 'has-preprint', 'is-version-of', 'has-version') for x in p.get('relation', {}).get(key, [])]
-                results.append({'title': (p.get('title') or [''])[0], 'abstract': re.sub('<[^>]+>', '', p.get('abstract', '')), 'doi': doi(p.get('DOI')), 'authors': [' '.join([x.get('given', ''), x.get('family', '')]).strip() for x in p.get('author', [])], **bibliography, 'journal': (p.get('container-title') or [''])[0], 'url': p.get('URL', ''), 'pdf_urls': [x['URL'] for x in p.get('link', []) if x.get('content-type') == 'application/pdf'], 'publication_status': 'published' if published else ('preprint' if p.get('type') == 'posted-content' else 'unknown'), 'versions': relations + [doi(p.get('DOI'))], 'source': 'Crossref'})
+                results.append({'title': (p.get('title') or [''])[0], 'abstract': re.sub('<[^>]+>', '', p.get('abstract', '')), 'doi': doi(p.get('DOI')), 'authors': [' '.join([x.get('given', ''), x.get('family', '')]).strip() for x in p.get('author', [])], **bibliography, 'journal': (p.get('container-title') or [''])[0], 'url': p.get('URL', ''), 'pdf_urls': [x['URL'] for x in p.get('link', []) if x.get('content-type') == 'application/pdf'], 'publication_status': 'published' if published else ('preprint' if p.get('type') == 'posted-content' else 'unknown'), 'versions': relations + [doi(p.get('DOI'))], 'source': 'Crossref', 'source_ids': {'doi': doi(p.get('DOI'))}, 'referenced_works': [doi(x.get('DOI')) for x in p.get('reference', []) if x.get('DOI')], 'citation_count': p.get('is-referenced-by-count'), 'retrieved_at': dt.datetime.now(dt.timezone.utc).isoformat()})
         except (httpx.HTTPError, KeyError, TypeError):
             errors.append('Crossref 元数据请求失败或返回不完整')
         key = config.get('openalex_key')
@@ -94,14 +161,7 @@ def search(query, start_year, config):
                 r = c.get('https://api.openalex.org/works', params={'search': query, 'filter': f'from_publication_date:{start_year}-01-01', 'per-page': 40}, headers={'Authorization': 'Bearer ' + key})
                 r.raise_for_status()
                 for p in r.json()['results']:
-                    loc = p.get('primary_location') or {}
-                    published = loc.get('is_published') is True
-                    biblio = p.get('biblio') or {}
-                    first, last = biblio.get('first_page') or '', biblio.get('last_page') or ''
-                    inverted = p.get('abstract_inverted_index') or {}
-                    words = {i: word for word, indices in inverted.items() for i in indices}
-                    abstract = ' '.join(words[i] for i in sorted(words))
-                    results.append({'title': p.get('title') or '', 'abstract':abstract, 'doi': doi(p.get('doi')), 'authors': [x['author']['display_name'] for x in p.get('authorships', [])], 'year': p.get('publication_year'), 'publication_date': p.get('publication_date', ''), 'first_publication_date': '', 'first_publication_date_status': 'unknown', 'publication_date_status': 'source_metadata_not_independently_verified', 'volume': biblio.get('volume') or '', 'issue': biblio.get('issue') or '', 'pages': first + ('–' + last if last and last != first else ''), 'journal': (loc.get('source') or {}).get('display_name', ''), 'url': loc.get('landing_page_url') or p.get('doi') or '', 'pdf_urls': list(dict.fromkeys(x['pdf_url'] for x in p.get('locations', []) if x.get('pdf_url'))), 'publication_status': 'published' if published else ('preprint' if p.get('type') == 'preprint' else 'unknown'), 'versions': [doi(p.get('doi'))], 'source': 'OpenAlex'})
+                    results.append(openalex_paper(p))
             except (httpx.HTTPError, KeyError, TypeError):
                 errors.append('OpenAlex 元数据请求失败或返回不完整')
         else:
@@ -114,6 +174,9 @@ def search(query, start_year, config):
         if existing:
             existing['pdf_urls'] = list(dict.fromkeys(existing['pdf_urls'] + p['pdf_urls']))
             existing['versions'] = list(dict.fromkeys(existing['versions'] + p['versions']))
+            for field in ('source_ids', 'openalex_id', 'language', 'citation_count', 'referenced_works', 'related_works', 'content_urls', 'has_content', 'retrieved_at'):
+                if p.get(field) is not None and (not existing.get(field) or field == 'citation_count'):
+                    existing[field] = p[field]
         else:
             merged.append(p)
     return merged, errors

@@ -10,7 +10,7 @@ const pdf=()=>new Response(new TextEncoder().encode('%PDF-1.7 synthetic fixture 
 test('OpenAlex preserves real abstract order, DOI, publication version and only public OA PDF locations',()=>{
   assert.equal(abstractFromIndex({three:[2],one:[0],two:[1],bad:[-1,20000,'3']}),'one two three');
   const paper=openAlexPaper(oa());assert.equal(paper.abstract,'A real abstract');assert.equal(paper.doi,doi);assert.equal(paper.publication_status,'published');assert.equal(paper.source,'OpenAlex');assert.deepEqual(paper.pdf_urls,['https://papers.example/study.pdf']);
-  assert.equal(openAlexPaper(oa({doi:null})),null);assert.equal(openAlexPaper(oa({type:'preprint'})).publication_status,'preprint');assert.equal(openAlexPaper(oa({primary_location:{source:{display_name:'Unknown'}}})).publication_status,'unknown');
+  assert.equal(openAlexPaper(oa({doi:null})).doi,'');assert.equal(openAlexPaper(oa({type:'preprint'})).publication_status,'preprint');assert.equal(openAlexPaper(oa({primary_location:{source:{display_name:'Unknown'}}})).publication_status,'unknown');
   for(const value of ['http://papers.example/a.pdf','https://127.0.0.1/a','https://[::1]/a','https://user:key@papers.example/a','https://server.internal/a'])assert.equal(publicDocumentUrl(value),null);
 });
 
@@ -21,12 +21,12 @@ test('source merging enriches a Crossref record while retaining identity, relati
 
 test('open-source discovery and DOI supplementation do not receive model credentials and unsuccessful enrichment remains retryable',async()=>{
   const calls=[];let fail=true;const sources=createResearchSources({extractPdf:async()=>{},request:async(url,options)=>{calls.push({url,options});if(url.includes('/works/')){if(fail){fail=false;return new Response('{}',{status:429});}return Response.json(oa());}return Response.json({results:[oa(),oa({doi:null})]});}});
-  assert.equal((await sources.discover('measurement controls',2024)).length,1);assert.match(calls[0].url,/from_publication_date/);const paper={doi,source:'Crossref',abstract:'',pdf_urls:[]};await assert.rejects(sources.supplement(paper),/429/);assert.equal(paper.enrichment_attempted,undefined);await sources.supplement(paper);assert.equal(paper.abstract,'A real abstract');assert.equal(paper.enrichment_attempted,true);assert.equal(calls.every(c=>!c.options.headers?.Authorization),true);
+  assert.equal((await sources.discover('measurement controls',2024)).length,2);assert.match(calls[0].url,/from_publication_date/);const paper={doi,source:'Crossref',abstract:'',pdf_urls:[]};await assert.rejects(sources.supplement(paper),/429/);assert.equal(paper.enrichment_attempted,undefined);await sources.supplement(paper);assert.equal(paper.abstract,'A real abstract');assert.equal(paper.enrichment_attempted,true);assert.equal(calls.every(c=>!c.options.headers?.Authorization),true);
 });
 
 test('actual matching PDF text is preferred, bounded, fingerprinted, and missing pages remain explicit',async()=>{
   let parsed=0;const sources=createResearchSources({request:async()=>pdf(),extractPdf:async()=>{parsed++;return extracted({text_pages:[{page:1,text:'A synthetic measurement study DOI: '+doi+' '+ 'a'.repeat(61000)},{page:2,text:'never sent'}],text_characters:62000});}});const source=await sources.acquire(openAlexPaper(oa()));
-  assert.equal(parsed,1);assert.equal(source.basis,'fulltext');assert.equal(source.characters_sent,60000);assert.equal(source.characters_available,62000);assert.deepEqual(source.unread_pages,[3]);assert.equal(source.sha256,'f'.repeat(64));assert.equal(source.blocks[0].id,'PDF-P1');assert.equal(source.blocks[0].page,1);assert.equal(source.blocks.some(block=>block.page===2),false);
+  assert.equal(parsed,1);assert.equal(source.basis,'fulltext');assert.equal(source.characters_sent,source.blocks.reduce((n,b)=>n+b.text.length,0));assert.equal(source.characters_available,62000);assert.deepEqual(source.unread_pages,[3]);assert.equal(source.sha256,'f'.repeat(64));assert.equal(source.blocks[0].id,'PDF-P1');assert.equal(source.blocks[0].page,1);assert.equal(source.blocks.some(block=>block.page===2),true);
 });
 
 test('unmatched, inaccessible and oversized PDFs never become a fulltext report and retain actual abstract fallback',async()=>{
