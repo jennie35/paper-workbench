@@ -4,6 +4,7 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import {activeStatuses,needsEvidence,summarizeBatch,paperIdsForBatch} from '../results.js';
 import {hasReportContent,referenceValue} from '../research-view.js';
+import {batchProgressHtml,updateBatchProgressTimes} from '../research-progress.js';
 const code=readFileSync(new URL('../app.js',import.meta.url),'utf8');
 const extract=(start,end)=>{const a=code.indexOf(start),b=code.indexOf(end,a);assert.ok(a>=0&&b>a);return code.slice(a,b);};
 const el=()=>({value:'',dataset:{},hidden:false,classList:{toggle(){}},setAttribute(){},removeAttribute(){},querySelectorAll:()=>[],querySelector:()=>null,addEventListener(){}});
@@ -71,11 +72,21 @@ test('cards expose reference value and recover saved transfer advice without fab
 test('batch summary reports target and actual new count without reuse or shortfall counters',()=>{
   const job={id:'batch',requested:5,status:'completed',checkpoint:{reused:['old'],completed:[]}},fields=new Map();
   const $=id=>{if(!fields.has(id))fields.set(id,el());return fields.get(id);};
-  const context=vm.createContext({loadProject(){},retryForm(){},api(){},renderImportedSources(){},renderProjectGraph(){},state:{demo:false},$,selectedBatch:()=>job,summarizeBatch,batchReportCounts:()=>({generated:2,reused:1}),batchLabel:()=> 'B001',dateLabel:()=> '10-22',esc:String,badge:String,bindResultActions(){}});
+  const context=vm.createContext({loadProject(){},retryForm(){},api(){},renderImportedSources(){},renderProjectGraph(){},batchProgressHtml,updateBatchProgressTimes,state:{demo:false},$,selectedBatch:()=>job,summarizeBatch,batchReportCounts:()=>({generated:2,reused:1}),batchLabel:()=> 'B001',dateLabel:()=> '10-22',esc:String,badge:String,bindResultActions(){}});
   vm.runInContext(extract('function searchDiagnosisHtml(','function directDraftCount('),context);context.renderBatchSummary();
   const html=$('batchSummary').innerHTML;
   assert.match(html,/目标新增 5 篇/);assert.match(html,/已生成 2\/5 篇正文报告/);
   assert.doesNotMatch(html,/复用|缺额|本批新增 5 篇/);assert.match(html,/data-retry="batch"/);
+});
+
+test('active progress refreshes local clocks only and releases its ticker on leaving the project',()=>{
+  const started=Date.now()-65000,job={id:'running-batch',requested:5,status:'running',stage:'获取全文',checkpoint:{completed:[],run_timing:{elapsed_ms:0,run_started_at:new Date(started).toISOString(),run_initial_completed:0,running:true}}},fields=new Map(),nodes=new Map([['[data-progress-elapsed]',{textContent:''}],['[data-progress-eta]',{textContent:''}]]);
+  const $=id=>{if(!fields.has(id))fields.set(id,{...el(),querySelector:key=>nodes.get(key)});return fields.get(id);};
+  const state={demo:false,mode:'direct',nav:'library'};let callback,cleared=0,intervals=0;
+  const context=vm.createContext({state,$,selectedBatch:()=>job,summarizeBatch,batchReportCounts:()=>({generated:0}),batchLabel:()=> 'B001',dateLabel:()=> '',esc:String,badge:String,bindResultActions(){},batchProgressHtml,updateBatchProgressTimes,setInterval:fn=>{callback=fn;intervals++;return 7;},clearInterval:id=>{assert.equal(id,7);cleared++;},api(){throw new Error('Local tick must not call API');}});
+  vm.runInContext(extract('function searchDiagnosisHtml(','function directDraftCount('),context);context.renderBatchSummary();
+  assert.match($('batchSummary').innerHTML,/<progress/);assert.equal(intervals,1);callback();assert.match(nodes.get('[data-progress-elapsed]').textContent,/1分/);assert.equal(nodes.get('[data-progress-eta]').textContent,'本次完成首篇后估算');
+  state.nav='home';callback();assert.equal(cleared,1);assert.equal(context.renderBatchSummary.progressTicker,null);
 });
 
 test('opening project deletion confirmation does not delete anything and blocks active analysis',()=>{

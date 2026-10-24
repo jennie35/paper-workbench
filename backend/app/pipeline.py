@@ -23,6 +23,7 @@ from .research import RESEARCH_RULES, check_research_logic, stamp_reading_scope,
 from .visual_review import checked_visual_records, inspection_receipt, stamp_visual_evidence
 from .reading_core import CORE_RULES, validate_core_report, completion_status
 from .acquisition import acquire_pdf
+from .timing import start_run_timing, finish_run_timing, mark_timing_checkpoint
 from .search_planning import SEARCH_VERSION, plan_queries, search_scope, search_diagnosis, metadata_pool
 
 
@@ -43,6 +44,7 @@ def checkpoint(job_id, state, stage=None, status=None, error=None):
         job = s.get(Job, job_id)
         if job.cancel:
             raise Cancelled()
+        mark_timing_checkpoint(state)
         job.checkpoint = json.dumps(state, ensure_ascii=False)
         job.updated_at = now()
         if stage:
@@ -537,6 +539,7 @@ def _run_job(job_id, heartbeat=lambda: None, provider=None, skill=None):
         state = json.loads(job.checkpoint)
         project = s.get(Project, job.project_id)
         project_id, requested = project.id, job.requested
+        last_updated_at = job.updated_at
         scope = state.setdefault('scope_snapshot', json.loads(project.scope))
     state.setdefault('candidates', [])
     state.setdefault('completed', [])
@@ -547,6 +550,7 @@ def _run_job(job_id, heartbeat=lambda: None, provider=None, skill=None):
         heartbeat()
         checkpoint(job_id, state, stage, 'running')
 
+    timing_started = False
     try:
         # Repair legacy counting checkpoints without deleting the old topic
         # association or its notes. Keep these IDs out of the new-paper view.
@@ -566,6 +570,8 @@ def _run_job(job_id, heartbeat=lambda: None, provider=None, skill=None):
             if candidate.get('paper_id') in state['reused']:
                 candidate.update(status='duplicate', reason='已有分析，不计新增')
                 candidate.pop('paper_id', None)
+        start_run_timing(state, len(state['completed']), last_updated_at)
+        timing_started = True
         progress('接口预检')
         cfg = configuration() if provider is None else getattr(provider, 'config', {})
         provider, skill = provider or Provider(cfg), skill or Skill()
@@ -811,6 +817,19 @@ def _run_job(job_id, heartbeat=lambda: None, provider=None, skill=None):
         with session() as s:
             j = s.get(Job, job_id)
             j.status, j.error, j.checkpoint, j.updated_at = 'failed', safe_error(e), json.dumps(state, ensure_ascii=False), now()
+    finally:
+        if timing_started:
+            started_at = state['run_timing']['run_started_at']
+            finish_run_timing(state)
+            with session() as s:
+                j = s.get(Job, job_id)
+                if j:
+                    saved = json.loads(j.checkpoint)
+                    # A new attempt may already have been admitted after this
+                    # run's terminal checkpoint. Never replace its newer timer.
+                    if (saved.get('run_timing') or {}).get('run_started_at') == started_at:
+                        saved['run_timing'] = state['run_timing']
+                        j.checkpoint, j.updated_at = json.dumps(saved, ensure_ascii=False), now()
 
 
 def safe_error(error):

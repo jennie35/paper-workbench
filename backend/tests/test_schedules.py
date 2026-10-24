@@ -123,6 +123,7 @@ def test_waiting_scheduled_batch_resumes_original_checkpoint(logged, monkeypatch
         row.last_job_id = 'previous'
         s.add(Job(id='previous', project_id=pid, requested=5, status='waiting_sources', checkpoint=json.dumps({
             'new_count': 2, 'scope_snapshot': json.loads(s.get(Project, pid).scope),
+            'search_steps': [{'query': 'old attempted expression', 'from_year': 2025}],
             'candidates': [{'status': 'completed', 'paper_id': 'R001'}, {'status': 'no_fulltext'}],
         })))
     assert tick(lambda _: None, _admission_lock, lambda: {}, CURRENT) == ['previous']
@@ -130,6 +131,7 @@ def test_waiting_scheduled_batch_resumes_original_checkpoint(logged, monkeypatch
         assert s.query(Job).count() == 1
         state = json.loads(s.get(Job, 'previous').checkpoint)
         assert state['new_count'] == 2 and state['candidates'][0]['status'] == 'completed'
+        assert state['search_steps'] == []
         assert state['candidates'][1]['status'] == 'pending'
         assert state['scope_snapshot']['research_question'].startswith('How does a synthetic')
 

@@ -9,7 +9,7 @@ function renderContext(nav='home',project={id:'A',name:'Topic A'}){
   const fields=new Map(),calls=[];
   const $=id=>{if(!fields.has(id))fields.set(id,{hidden:false,value:'',classList:{toggle(){}},setAttribute(){},removeAttribute(){}});return fields.get(id);};
   const state={nav,project,projects:project?[project]:[],papers:[{id:'R001',analysis:{verified:true,actions:[]}}],jobs:[{id:'A-job',checkpoint:{candidates:[]}}],view:'latest',demo:false};
-  const context=vm.createContext({state,$,esc:String,document:{querySelectorAll:()=>[]},connection(){},renderWorkflow(){calls.push('workflow');},renderPapers(){calls.push('papers');},renderJobs(){calls.push('jobs');},renderProjects(){calls.push('home');}});
+  const context=vm.createContext({state,$,esc:String,document:{querySelectorAll:()=>[]},connection(){},stopBatchProgressTicker(){},renderWorkflow(){calls.push('workflow');},renderPapers(){calls.push('papers');},renderJobs(){calls.push('jobs');},renderProjects(){calls.push('home');}});
   vm.runInContext(extract('function render(){','function tags('),context);
   return {context,state,$,calls};
 }

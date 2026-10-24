@@ -1,5 +1,5 @@
 // Pure, escaped HTML projections of saved research records; no model calls.
-import {researchFlowSvg,designMap,storylineMap,evidenceActionMap} from './research-diagrams.js?v=20261023-search2';
+import {researchFlowSvg,designMap,storylineMap,evidenceActionMap} from './research-diagrams.js?v=20261024-progress1';
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const object=value=>value&&typeof value==='object'&&!Array.isArray(value)?value:{};
 const rows=value=>Array.isArray(value)?value.filter(x=>x!=null):[];

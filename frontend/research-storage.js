@@ -1,6 +1,6 @@
 // User-authorized directory storage. A verified manifest is the commit point.
 // Never reads outside the selected handle or recursively clears a user folder.
-import {recordMarkdown,recordEvidence,researchFlowSvg,exportOfflineHtml} from './research-export.js?v=20261023-search2';
+import {recordMarkdown,recordEvidence,researchFlowSvg,exportOfflineHtml} from './research-export.js?v=20261024-progress1';
 const HEAD='paper-workbench.json',MAGIC='paper-workbench-directory-v1';
 const copy=value=>value==null?null:JSON.parse(JSON.stringify(value));
 const safe=value=>{const name=String(value);if(!/^[A-Za-z0-9_.-]{1,160}$/.test(name)||name==='.'||name==='..')throw new Error('研究库文件名无效，未写入目录。');return name;};

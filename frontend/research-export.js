@@ -1,7 +1,7 @@
-import {graphSnapshotHtml,graphSnapshotStyle,demoGraphForPapers} from './research-graph.js?v=20261023-search2';
+import {graphSnapshotHtml,graphSnapshotStyle,demoGraphForPapers} from './research-graph.js?v=20261024-progress1';
 // Projections of saved records only. Exporting never calls a model or upgrades evidence.
-import {reportSections,synthesisHtml,hasReportContent,referenceValue,verifiedOriginals} from './research-view.js?v=20261023-search2';
-import {researchFlowSvg,diagramStyle} from './research-diagrams.js?v=20261023-search2';
+import {reportSections,synthesisHtml,hasReportContent,referenceValue,verifiedOriginals} from './research-view.js?v=20261024-progress1';
+import {researchFlowSvg,diagramStyle} from './research-diagrams.js?v=20261024-progress1';
 const esc=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const array=value=>Array.isArray(value)?value:[];
 const obj=value=>value&&typeof value==='object'&&!Array.isArray(value)?value:{};
@@ -11,7 +11,7 @@ const display=value=>`<pre>${esc(text(value))}</pre>`;
 const plain=html=>html.replace(/<img[^>]*src="([^"]*)"[^>]*alt="([^"]*)"[^>]*>/g,'\n![$2]($1)\n').replace(/<a href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/g,'$2 ($1)').replace(/<h3[^>]*>/g,'\n### ').replace(/<\/(?:p|h3|dd|div|details|li|summary)>/g,'\n').replace(/<dt>/g,'\n').replace(/<\/dt>/g,'：').replace(/<li>/g,'- ').replace(/<[^>]*>/g,'').replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/\n{3,}/g,'\n\n').trim();
 const jsonMarkdown=value=>'```json\n'+JSON.stringify(value,null,2).replaceAll('```','\\u0060\\u0060\\u0060')+'\n```';
 
-export {researchFlowSvg} from './research-diagrams.js?v=20261023-search2';
+export {researchFlowSvg} from './research-diagrams.js?v=20261024-progress1';
 
 export function recordEvidence(paper){
   const a=obj(paper.analysis);

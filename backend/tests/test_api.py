@@ -98,6 +98,27 @@ def candidate_fixture(logged, status='unverified'):
     return jid, folder
 
 
+def test_explicit_retry_refreshes_sources_without_discarding_reading_checkpoints(logged, monkeypatch):
+    jid, folder = candidate_fixture(logged)
+    (folder / 'text-checkpoints.json').write_text('[{"notes":"saved body reading"}]', 'utf-8')
+    with session() as s:
+        job = s.get(Job, jid)
+        state = json.loads(job.checkpoint)
+        state.update(search_steps=[{'query': 'previous search', 'from_year': 2025}],
+                     search_plan={'version': 2, 'queries': [{'query': 'saved query'}]})
+        job.checkpoint = json.dumps(state)
+    queued = []
+    monkeypatch.setattr('app.main.enqueue', queued.append)
+    assert logged.post(f'/api/jobs/{jid}/retry').status_code == 200
+    with session() as s:
+        state = json.loads(s.get(Job, jid).checkpoint)
+        assert state['search_steps'] == []
+        assert state['search_plan']['queries'][0]['query'] == 'saved query'
+        assert state['candidates'][0]['status'] == 'pending'
+    assert queued == [jid]
+    assert (folder / 'text-checkpoints.json').read_text('utf-8') == '[{"notes":"saved body reading"}]'
+
+
 def test_candidate_partial_content_without_false_completion(logged):
     jid, folder = candidate_fixture(logged)
     draft = analysis()

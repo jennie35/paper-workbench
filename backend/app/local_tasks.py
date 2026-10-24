@@ -30,12 +30,17 @@ def task_state(job_id):
 
 
 def recover():
+    import json
     from sqlalchemy import select
     from .db import session, Job, now
+    from .timing import freeze_interrupted_timing
     with session() as s:
         jobs = s.scalars(select(Job).where(Job.status.in_(['queued', 'running'])).order_by(Job.created_at)).all()
         ids = [j.id for j in jobs]
         for j in jobs:
+            state = json.loads(j.checkpoint)
+            if freeze_interrupted_timing(state, j.updated_at):
+                j.checkpoint = json.dumps(state, ensure_ascii=False)
             j.status, j.updated_at = 'queued', now()
     for job_id in ids:
         enqueue(job_id)

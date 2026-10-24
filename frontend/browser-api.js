@@ -1,10 +1,10 @@
-import {createResearchSources,mergeSourcePaper,publicDocumentUrl} from './research-sources.js?v=20261023-search2';
-import {normalizeResearchConfig,normalizeResearchLogic,buildReportPrompt,buildScopePrompt,buildSynthesisPrompt,normalizeSynthesis} from './research-contract.js?v=20261023-search2';
-import {createDirectoryWorkspaceStore} from './research-storage.js?v=20261023-search2';
-import {researchFlowSvg,exportResearchMarkdown,exportOfflineHtml} from './research-export.js?v=20261023-search2';
-import {VISUAL_REVIEW_PROMPT,imageSha256,stampVisualReview,sourceImageBytes,visualAsset} from './paper-visuals.js?v=20261023-search2';
-import {SEARCH_VERSION,searchTopic,SEARCH_PLAN_PROMPT,normalizeSearchPlan,SHORTLIST_PROMPT,selectedCandidates,compareCandidates,searchDiagnosis} from './research-search.js?v=20261023-search2';
-import {coreReportStatus,sourceGroups,CORE_READING_PROMPT} from './core-report.js?v=20261023-search2';
+import {createResearchSources,mergeSourcePaper,publicDocumentUrl} from './research-sources.js?v=20261024-progress1';
+import {normalizeResearchConfig,normalizeResearchLogic,buildReportPrompt,buildScopePrompt,buildSynthesisPrompt,normalizeSynthesis} from './research-contract.js?v=20261024-progress1';
+import {createDirectoryWorkspaceStore} from './research-storage.js?v=20261024-progress1';
+import {researchFlowSvg,exportResearchMarkdown,exportOfflineHtml} from './research-export.js?v=20261024-progress1';
+import {VISUAL_REVIEW_PROMPT,imageSha256,stampVisualReview,sourceImageBytes,visualAsset} from './paper-visuals.js?v=20261024-progress1';
+import {SEARCH_VERSION,searchTopic,SEARCH_PLAN_PROMPT,normalizeSearchPlan,SHORTLIST_PROMPT,selectedCandidates,compareCandidates,searchDiagnosis} from './research-search.js?v=20261024-progress1';
+import {coreReportStatus,sourceGroups,CORE_READING_PROMPT} from './core-report.js?v=20261024-progress1';
 // Browser-owned records. Model credentials intentionally never enter this store.
 const DATABASE = 'paper-workbench-browser-v1';
 const LOCK = 'paper-workbench-browser-analysis-v1';
@@ -113,15 +113,33 @@ function researchContext(scope={}) {
   return context;
 }
 
-export function createBrowserApi({store=createDirectoryWorkspaceStore({fallbackStore:indexedDbStore()}),fetchImpl=globalThis.fetch?.bind(globalThis),cryptoImpl=globalThis.crypto,onChange=()=>{},lockManager=globalThis.navigator?.locks,extractPdf=async (file,options)=>(await import('./pdf-reference.js?v=20261023-search2')).extractReferencePdf(file,options)}={}) {
+export function createBrowserApi({store=createDirectoryWorkspaceStore({fallbackStore:indexedDbStore()}),fetchImpl=globalThis.fetch?.bind(globalThis),cryptoImpl=globalThis.crypto,onChange=()=>{},lockManager=globalThis.navigator?.locks,clockImpl=Date.now,extractPdf=async (file,options)=>(await import('./pdf-reference.js?v=20261024-progress1')).extractReferencePdf(file,options)}={}) {
   let workspace=emptyWorkspace(),config=null,saveQueue=Promise.resolve(),running=null,pendingAdmission=false,persistenceFailure=false,initializationError=null;
   let storageInfo={kind:'browser',supported:false,selected:false,name:'',path_notice:'浏览器 IndexedDB；尚未绑定本地长期保存目录。',permission:'granted',needs_reconnect:false};
   const controllers=new Map(),locks=lockManager;
   const id=()=>cryptoImpl?.randomUUID?.()||`browser-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  const save=()=>{const snapshot=clone(workspace);return saveQueue=saveQueue.catch(()=>{}).then(async()=>{try{await store.save(snapshot);persistenceFailure=false;}catch(error){persistenceFailure=true;const detail=storageInfo.kind==='directory'&&error instanceof Error?' '+error.message.slice(0,500):'';throw new Error('浏览器研究库保存失败；本页数据可能尚未持久化，请保留页面并导出备份后重试。'+detail);}});};
+  const save=()=>{const active=workspace.jobs.find(job=>job.id===running);if(active?.checkpoint?.run_timing?.running)active.updated_at=new Date(clockImpl()).toISOString();const snapshot=clone(workspace);return saveQueue=saveQueue.catch(()=>{}).then(async()=>{try{await store.save(snapshot);persistenceFailure=false;}catch(error){persistenceFailure=true;const detail=storageInfo.kind==='directory'&&error instanceof Error?' '+error.message.slice(0,500):'';throw new Error('浏览器研究库保存失败；本页数据可能尚未持久化，请保留页面并导出备份后重试。'+detail);}});};
   const emit=job=>{try{onChange(clone(job));}catch{}};
+  const elapsed=value=>Number.isFinite(Number(value))&&Number(value)>=0?Number(value):0;
+  function stopRunTiming(job,at){
+    const timing=job.checkpoint?.run_timing;if(!timing||timing.running!==true)return false;
+    const start=Date.parse(timing.run_started_at),end=typeof at==='number'?at:Date.parse(at);
+    const duration=Number.isFinite(start)&&Number.isFinite(end)?Math.max(0,end-start):0;
+    timing.run_elapsed_ms=duration;timing.elapsed_ms=elapsed(timing.elapsed_ms)+duration;timing.running=false;
+    timing.stopped_at=Number.isFinite(start)?new Date(start+duration).toISOString():null;return true;
+  }
+  function startRunTiming(job){
+    // A surviving unfinished stamp is bounded by its last saved checkpoint,
+    // never by the time the browser happens to be reopened.
+    stopRunTiming(job,job.updated_at);
+    const previous=job.checkpoint.run_timing;
+    job.checkpoint.run_timing={elapsed_ms:elapsed(previous?.elapsed_ms),running:true,
+      run_started_at:new Date(clockImpl()).toISOString(),run_initial_completed:job.core_reports||0,
+      run_elapsed_ms:0,stopped_at:null};
+  }
   function recoverInterruptedJobs(){
     let changed=false;for(const job of workspace.jobs){
+      if(stopRunTiming(job,job.updated_at))changed=true;
       if(ACTIVE.has(job.status)){job.status='failed';job.stage='已中断';job.error='网页已关闭或刷新，浏览器任务已停止；检查点保留，请手动继续。';job.updated_at=now();changed=true;}
       if(job.checkpoint?.synthesis?.status==='running'){job.checkpoint.synthesis={...job.checkpoint.synthesis,status:'failed',error:'网页已关闭或刷新，跨论文综合已停止；请显式重试，读取页面不会自动调用模型。'};if(job.status==='completed')job.stage='完成';changed=true;}
     }return changed;
@@ -376,7 +394,7 @@ export function createBrowserApi({store=createDirectoryWorkspaceStore({fallbackS
   async function run(job){
     const controller=new AbortController();controllers.set(job.id,controller);running=job.id;localRuns.add(LOCK);
     try{
-      requireConfig();job.status='running';job.error='';job.cancel_requested=false;await stage(job,'检索');
+      requireConfig();reportCounts(job);startRunTiming(job);job.status='running';job.error='';job.cancel_requested=false;await stage(job,'检索');
       const checkpoint=job.checkpoint,scope=checkpoint.scope_snapshot,queries=job.revision_only?[]:await ensureSearchPlan(job,controller.signal);checkpoint.search_queries=queries;reportCounts(job);
       if(checkpoint.candidates.some(c=>c.status==='pending'))await analyzeCandidates(job,controller.signal);
       const year=new Date().getUTCFullYear(),ranges=[year-2,year-5,null];
@@ -387,7 +405,7 @@ export function createBrowserApi({store=createDirectoryWorkspaceStore({fallbackS
       checkAbort(controller.signal);reportCounts(job);
       checkAbort(controller.signal);checkpoint.search_diagnosis=searchDiagnosis(job);job.status=targetReached(job)?'completed':'waiting_sources';job.stage=job.status==='completed'?'完成':'等待资料';checkpoint.diagnostics.push(`已新增 ${job.core_reports}/${job.requested} 篇正文核心报告。摘要保留在资料面板；等待补充正文或调整检索范围。`);
     }catch(error){job.status=controller.signal.aborted?'cancelled':'failed';job.stage=controller.signal.aborted?'已取消':'已中断';job.error=controller.signal.aborted?'已取消；已保存的研究报告与检索记录保留。':error.message;}
-    finally{reportCounts(job);job.checkpoint.search_diagnosis=searchDiagnosis(job);job.updated_at=now();try{await save();}catch{job.status='failed';job.stage='保存失败';job.persistence_error=true;job.error='浏览器存储失败，部分结果只保留在当前页面内存。请勿刷新，先导出备份，再检查存储权限或空间。';}controllers.delete(job.id);if(running===job.id)running=null;localRuns.delete(LOCK);emit(job);}
+    finally{reportCounts(job);stopRunTiming(job,clockImpl());job.checkpoint.search_diagnosis=searchDiagnosis(job);job.updated_at=now();try{await save();}catch{job.status='failed';job.stage='保存失败';job.persistence_error=true;job.error='浏览器存储失败，部分结果只保留在当前页面内存。请勿刷新，先导出备份，再检查存储权限或空间。';}controllers.delete(job.id);if(running===job.id)running=null;localRuns.delete(LOCK);emit(job);}
   }
   async function launch(makeJob){
     requireConfig();if(!locks)throw new Error('当前浏览器不支持安全的跨标签页任务锁，已阻止运行以保护研究库。请使用支持 Web Locks 的现代浏览器，或切换私人后台模式。');if(running||localRuns.has(LOCK))throw new Error('当前已有浏览器分析批次，请先完成或取消。');
@@ -404,7 +422,7 @@ export function createBrowserApi({store=createDirectoryWorkspaceStore({fallbackS
   function sourceFor(paper){const a=paper.analysis||{},source=paper.reading_source||{},blocks=a.source_blocks||source.blocks||(paper.abstract?[{id:'ABSTRACT-1',page:null,locator:(paper.abstract_source||paper.source)+' abstract',text:paper.abstract}]:[]),checked=[...new Set((a.visuals||[]).filter(row=>row?.inspection_status==='verified'&&row.inspection_method==='vision_model'&&row.inspection_id).map(row=>row.page))];return {notice:checked.length?`实际获取的来源文字；仅 PDF 第 ${checked.join('、')} 页有保存的图像模型查看记录，未经人工复核；其他图表与公式未核验。`:'实际获取的来源文字；原图、表格与公式尚未视觉核验。',basis:a.source_basis||source.basis||'abstract',blocks:clone(blocks),source_url:a.source_metadata?.url||source.url||paper.url,coverage:clone(a.coverage||{}),sha256:a.source_metadata?.sha256||source.sha256||null};}
   function candidateDetail(job,index){const candidate=job.checkpoint.candidates[index];if(!candidate)throw new Error('候选不存在。');const paper=workspace.papers.find(x=>x.id===candidate.paper_id),source=sourceFor(paper||candidate),checked=[...new Set((paper?.analysis?.visuals||[]).filter(row=>row?.inspection_status==='verified'&&row.inspection_method==='vision_model').map(row=>row.page))];return {candidate:clone(candidate),analysis:paper?clone(paper.analysis):candidate.analysis?clone(candidate.analysis):null,reading_notes:[],notice:(paper?.analysis?.verification_status||'候选题录；原图、表格与公式尚未视觉核验')+'；未执行外部阅读技能。',artifacts:{pdf_available:false,source_available:Boolean(source.blocks.length),image_pages:checked,checked_visual_pages:checked}};}
   function exportBundle(project){
-    const jobs=workspace.jobs.filter(j=>j.project_id===project.id).map(j=>({id:j.id,mode:'direct',trigger_source:j.trigger_source||'manual',project_id:j.project_id,requested:j.requested,status:j.status,stage:j.stage,created_at:j.created_at,updated_at:j.updated_at,core_reports:j.core_reports||0,drafts_analyzed:j.drafts_analyzed||0,reports_generated:j.reports_generated??j.drafts_analyzed??0,fulltext_reports:j.fulltext_reports||0,abstract_reports:j.abstract_reports??j.drafts_analyzed??0,error:j.error||'',persistence_error:Boolean(j.persistence_error),checkpoint:{scope_snapshot:clone(j.checkpoint.scope_snapshot||{}),candidates:clone(j.checkpoint.candidates||[]),completed:clone(j.checkpoint.completed||[]),core_reports:j.core_reports||0,reused:clone(j.checkpoint.reused||[]),drafts_analyzed:j.checkpoint.drafts_analyzed||0,reports_generated:j.reports_generated??j.drafts_analyzed??0,report_shortfall:Math.max(0,j.requested-(j.core_reports||0)),draft_shortfall:Math.max(0,j.requested-(j.core_reports||0)),search_plan:clone(j.checkpoint.search_plan||null),search_diagnosis:clone(j.checkpoint.search_diagnosis||null),search_log:clone(j.checkpoint.search_log||[]),diagnostics:clone(j.checkpoint.diagnostics||[]),synthesis:clone(j.checkpoint.synthesis||null),synthesis_history:clone(j.checkpoint.synthesis_history||[])}}));
+    const jobs=workspace.jobs.filter(j=>j.project_id===project.id).map(j=>({id:j.id,mode:'direct',trigger_source:j.trigger_source||'manual',project_id:j.project_id,requested:j.requested,status:j.status,stage:j.stage,created_at:j.created_at,updated_at:j.updated_at,core_reports:j.core_reports||0,drafts_analyzed:j.drafts_analyzed||0,reports_generated:j.reports_generated??j.drafts_analyzed??0,fulltext_reports:j.fulltext_reports||0,abstract_reports:j.abstract_reports??j.drafts_analyzed??0,error:j.error||'',persistence_error:Boolean(j.persistence_error),checkpoint:{scope_snapshot:clone(j.checkpoint.scope_snapshot||{}),candidates:clone(j.checkpoint.candidates||[]),completed:clone(j.checkpoint.completed||[]),core_reports:j.core_reports||0,reused:clone(j.checkpoint.reused||[]),drafts_analyzed:j.checkpoint.drafts_analyzed||0,reports_generated:j.reports_generated??j.drafts_analyzed??0,report_shortfall:Math.max(0,j.requested-(j.core_reports||0)),draft_shortfall:Math.max(0,j.requested-(j.core_reports||0)),run_timing:clone(j.checkpoint.run_timing||null),search_plan:clone(j.checkpoint.search_plan||null),search_diagnosis:clone(j.checkpoint.search_diagnosis||null),search_log:clone(j.checkpoint.search_log||[]),diagnostics:clone(j.checkpoint.diagnostics||[]),synthesis:clone(j.checkpoint.synthesis||null),synthesis_history:clone(j.checkpoint.synthesis_history||[])}}));
     return {schema_version:2,mode:'direct',notice:'每篇报告标明实际来源与逐项核验范围；图像模型核验未经人工复核，未执行外部技能。参考 PDF 仅提取文字用于研究范围。导出含私人参考文字，请自行保管。',project:{id:project.id,name:project.name,goal:project.goal,scope:clone(projectView(project).scope),created_at:project.created_at},references:clone(referencesFor(project.id)),papers:clone(papersFor(project.id)),jobs};
   }
   const exportMarkdown=bundle=>exportResearchMarkdown(bundle);
@@ -443,7 +461,7 @@ export function createBrowserApi({store=createDirectoryWorkspaceStore({fallbackS
     if(match){const [,jid,action,indexString,resource,filename]=match,job=jobById(jid);
       if(!action)return clone(job);
       if(action==='cancel'){if(ACTIVE.has(job.status)&&!controllers.has(jid))throw new Error('请回到运行该批次的原标签页取消任务。');job.cancel_requested=true;controllers.get(jid)?.abort();await save();return clone(job);}
-      if(action==='retry'){if(ACTIVE.has(job.status))throw new Error('该批次仍在运行。');return launch(()=>{const current=jobById(jid);current.status='queued';current.stage='等待恢复';current.error='';for(const candidate of current.checkpoint.candidates){if(['no_fulltext','unverified'].includes(candidate.status)&&!candidate.paper_id){candidate.status='pending';candidate.enrichment_attempted=false;if(candidate.reading_source?.basis==='abstract')delete candidate.reading_source;}}return current;});}
+      if(action==='retry'){if(ACTIVE.has(job.status))throw new Error('该批次仍在运行。');return launch(()=>{const current=jobById(jid);current.status='queued';current.stage='等待恢复';current.error='';current.checkpoint.searched_sources=[];for(const candidate of current.checkpoint.candidates){if(['no_fulltext','unverified'].includes(candidate.status)&&!candidate.paper_id){candidate.status='pending';candidate.enrichment_attempted=false;if(candidate.reading_source?.basis==='abstract')delete candidate.reading_source;}}return current;});}
       if(action==='candidates'){const index=Number(indexString),detail=candidateDetail(job,index),paper=workspace.papers.find(x=>x.id===detail.candidate.paper_id);if(resource==='source'){const source=sourceFor(paper||detail.candidate);if(!source.blocks.length)throw new Error('尚无实际获取的来源文字。');return source;}if(resource==='pdf')throw new Error('浏览器模式仅保存全文提取文字，请通过报告中的来源链接访问原 PDF。');if(resource==='assets'){if(filename==='research-flow.svg'&&detail.analysis)return new Blob([flowSvg(detail.analysis.flow_steps,detail.analysis.source_basis)],{type:'image/svg+xml'});const image=await visualAsset(detail.analysis,filename,cryptoImpl);if(image)return image;throw new Error('原图尚未获取或核验。');}return detail;}
     }
     match=route.match(/^\/api\/papers\/([^/]+)\/source$/);if(match){const paper=workspace.papers.find(x=>x.id===match[1]);if(!paper||!workspace.links.some(link=>link.paper_id===paper.id))throw new Error('论文不存在。');return sourceFor(paper);}

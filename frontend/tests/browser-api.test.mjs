@@ -47,8 +47,8 @@ function mockFetch(items,{failAnalysis=0,analysisGate=null,fulltext=true}={}){
   };
   return {calls,fetchImpl};
 }
-async function setup(fetchImpl,store=memoryStore()){
-  const api=createBrowserApi({store,fetchImpl});await api.configure(config);
+async function setup(fetchImpl,store=memoryStore(),options={}){
+  const api=createBrowserApi({store,fetchImpl,...options});await api.configure(config);
   const project=await api.handle('/api/projects',{method:'POST',body:JSON.stringify({name:'Fixture topic',goal:'Test research evidence'})});
   await api.handle(`/api/projects/${project.id}/scope`,{method:'PUT',body:JSON.stringify({research_question:'Fixture research question',keywords:['fixture'],include:'Methods',exclude:'Unrelated',inferred:false})});
   return {api,project,store};
@@ -136,6 +136,66 @@ test('opening an interrupted browser workspace marks jobs recoverable without an
   const api=createBrowserApi({store,fetchImpl:async()=>{calls++;throw new Error('Must not call');}});await api.ready;const job=await api.handle('/api/jobs/orphan');assert.equal(job.status,'failed');assert.match(job.error,/手动继续/);assert.equal(calls,0);
 });
 
+test('completed direct runs retain measured time and export it without counting later idle time',async()=>{
+  const initial=Date.parse('2026-10-24T01:00:00Z');let clock=initial;const updates=[];
+  const mock=mockFetch([paper('10.1234/timed','Timed source fixture')],{analysisGate:async()=>{clock+=75000;}});
+  const {api,project}=await setup(mock.fetchImpl,memoryStore(),{clockImpl:()=>clock,onChange:job=>updates.push(job)});
+  const job=await settled(api,(await start(api,project)).id),timing=job.checkpoint.run_timing;
+  assert.equal(job.status,'completed');assert.equal(timing.elapsed_ms,75000);assert.equal(timing.run_elapsed_ms,75000);assert.equal(timing.run_initial_completed,0);assert.equal(timing.running,false);
+  assert.equal(timing.run_started_at,new Date(initial).toISOString());assert.equal(timing.stopped_at,new Date(initial+75000).toISOString());
+  assert.ok(updates.some(row=>row.status==='running'&&row.checkpoint.run_timing.running&&row.checkpoint.run_timing.elapsed_ms===0));
+  clock+=86400000;assert.deepEqual((await api.handle(`/api/jobs/${job.id}`)).checkpoint.run_timing,timing);
+  const bundle=JSON.parse(await (await api.handle(`/api/projects/${project.id}/export?kind=json`)).text());
+  assert.deepEqual(bundle.jobs[0].checkpoint.run_timing,timing);
+});
+
+test('resuming a partially completed run excludes paused days and records the existing report baseline',async()=>{
+  let clock=Date.parse('2026-10-24T02:00:00Z'),reads=0;
+  const first=paper('10.1234/part-a','First timed source'),second=paper('10.1234/part-b','Second timed source');
+  const mock=mockFetch([first,second],{analysisGate:async()=>{clock+=4000;reads+=1;if(reads===2)throw new Error('Synthetic interrupted second analysis');}});
+  const {api,project}=await setup(mock.fetchImpl,memoryStore(),{clockImpl:()=>clock});
+  const waiting=await settled(api,(await start(api,project,2)).id);
+  assert.equal(waiting.status,'failed');assert.equal(waiting.core_reports,1);assert.equal(waiting.checkpoint.run_timing.elapsed_ms,8000);assert.equal(waiting.checkpoint.run_timing.running,false);
+  clock+=2*86400000;await api.handle(`/api/jobs/${waiting.id}/retry`,{method:'POST'});
+  const final=await settled(api,waiting.id),timing=final.checkpoint.run_timing;
+  assert.equal(final.status,'completed');assert.equal(final.core_reports,2);assert.equal(timing.run_initial_completed,1);assert.equal(timing.run_elapsed_ms,4000);assert.equal(timing.elapsed_ms,12000);
+});
+
+test('waiting for unavailable sources stops the elapsed clock',async()=>{
+  let clock=Date.parse('2026-10-24T02:30:00Z');const mock=mockFetch([paper('10.1234/wait-time','Waiting source fixture','')]);
+  const {api,project}=await setup(async(...args)=>{clock+=100;return mock.fetchImpl(...args);},memoryStore(),{clockImpl:()=>clock});
+  const waiting=await settled(api,(await start(api,project)).id),timing=waiting.checkpoint.run_timing;
+  assert.equal(waiting.status,'waiting_sources');assert.ok(timing.elapsed_ms>0);assert.equal(timing.running,false);assert.equal(timing.run_initial_completed,0);
+  clock+=86400000;assert.deepEqual((await api.handle(`/api/jobs/${waiting.id}`)).checkpoint.run_timing,timing);
+});
+
+test('failed direct runs stop timing and a retry accumulates only its actual work',async()=>{
+  let clock=Date.parse('2026-10-24T03:00:00Z');
+  const mock=mockFetch([paper('10.1234/fail-time','Failure timing source')],{failAnalysis:1,analysisGate:async()=>{clock+=3000;}});
+  const {api,project}=await setup(mock.fetchImpl,memoryStore(),{clockImpl:()=>clock});
+  const failed=await settled(api,(await start(api,project)).id);
+  assert.equal(failed.status,'failed');assert.equal(failed.checkpoint.run_timing.running,false);assert.equal(failed.checkpoint.run_timing.elapsed_ms,3000);
+  clock+=86400000;await api.handle(`/api/jobs/${failed.id}/retry`,{method:'POST'});const final=await settled(api,failed.id);
+  assert.equal(final.status,'completed');assert.equal(final.checkpoint.run_timing.elapsed_ms,6000);assert.equal(final.checkpoint.run_timing.run_elapsed_ms,3000);
+});
+
+test('cancelling a direct request freezes the active-run timing',async()=>{
+  let clock=Date.parse('2026-10-24T04:00:00Z'),signalStarted;const started=new Promise(resolve=>{signalStarted=resolve;});
+  const mock=mockFetch([paper('10.1234/cancel-time','Cancellation timing source')],{analysisGate:signal=>new Promise((_,reject)=>{
+    clock+=6000;signalStarted();signal.addEventListener('abort',()=>reject(new Error('Cancelled test request')),{once:true});
+  })});
+  const {api,project}=await setup(mock.fetchImpl,memoryStore(),{clockImpl:()=>clock});const submitted=await start(api,project);await started;
+  await api.handle(`/api/jobs/${submitted.id}/cancel`,{method:'POST'});const cancelled=await settled(api,submitted.id);
+  assert.equal(cancelled.status,'cancelled');assert.equal(cancelled.checkpoint.run_timing.elapsed_ms,6000);assert.equal(cancelled.checkpoint.run_timing.running,false);
+});
+
+test('interrupted timing stops at the last saved checkpoint instead of the browser reopen date',async()=>{
+  const started='2026-10-20T01:00:00.000Z',updated='2026-10-20T01:00:12.000Z';let calls=0;
+  const store=memoryStore({version:1,projects:[],papers:[],links:[],counter:0,jobs:[{id:'timed-orphan',status:'running',updated_at:updated,checkpoint:{candidates:[],completed:[],run_timing:{elapsed_ms:5000,run_started_at:started,run_initial_completed:2,run_elapsed_ms:0,running:true}}}]});
+  const api=createBrowserApi({store,clockImpl:()=>Date.parse('2026-10-24T01:00:00Z'),fetchImpl:async()=>{calls++;throw new Error('No recovery model calls');}});await api.ready;
+  const job=await api.handle('/api/jobs/timed-orphan');assert.equal(job.status,'failed');assert.equal(job.checkpoint.run_timing.elapsed_ms,17000);assert.equal(job.checkpoint.run_timing.run_elapsed_ms,12000);assert.equal(job.checkpoint.run_timing.stopped_at,updated);assert.equal(job.checkpoint.run_timing.running,false);assert.equal(calls,0);
+});
+
 test('JSON, Markdown and offline HTML exports share the same draft record and never include API credentials',async()=>{
   const mock=mockFetch([paper('10.1234/export','<script>unsafe</script> Export fixture')]);const {api,project}=await setup(mock.fetchImpl);await settled(api,(await start(api,project)).id);
   for(const kind of ['json','markdown','html']){const blob=await api.handle(`/api/projects/${project.id}/export?kind=${kind}`,{binary:true}),content=await blob.text();assert.equal(content.includes(SECRET),false);assert.equal(content.includes('api_key'),false);assert.match(content,/summary|摘要|总结/);if(kind==='json'){const bundle=JSON.parse(content);assert.equal(bundle.papers[0].analysis.verified,false);assert.equal(bundle.project.name,'Fixture topic');assert.equal(bundle.jobs[0].checkpoint.candidates.length,1);}if(kind==='html'){assert.equal(blob.type,'text/html;charset=utf-8');assert.doesNotMatch(content,/<script>/);assert.match(content,/未执行外部技能/);}}
@@ -185,6 +245,27 @@ test('an end-of-job storage failure stays visible in memory and can be exported 
 test('candidate archives survive JSON and Markdown while offline HTML omits empty retrieval logs',async()=>{
   const mock=mockFetch([paper('10.1234/gap','Candidate without abstract','')]);const {api,project}=await setup(mock.fetchImpl);await settled(api,(await start(api,project)).id);
   for(const kind of ['json','markdown','html']){const content=await (await api.handle(`/api/projects/${project.id}/export?kind=${kind}`)).text();if(kind==='html'){assert.doesNotMatch(content,/Candidate without abstract|检索来源与筛选记录|跨论文综合/);}else{assert.match(content,/Candidate without abstract/);assert.match(content,/等待论文正文|补充摘要与开放全文|检索源未提供摘要/);}assert.match(content,/Fixture research question/);if(kind==='json'){const bundle=JSON.parse(content);assert.equal(bundle.papers.length,0);assert.equal(bundle.jobs[0].checkpoint.draft_shortfall,1);assert.equal(bundle.jobs[0].checkpoint.search_log.length,6);}}
+});
+
+test('an explicit retry refreshes exhausted source admissions while retaining query, relevance and report caches',async()=>{
+  let sourceAvailable=false;
+  const old=paper('10.1234/refresh-pdf','An actual source later gaining public PDF','');
+  const available=paper('10.1234/refresh-pdf','An actual source later gaining public PDF');
+  const mock=mockFetch(()=>[sourceAvailable?available:old]);const {api,project,store}=await setup(mock.fetchImpl);
+  const first=await settled(api,(await start(api,project)).id);
+  assert.equal(first.status,'waiting_sources');assert.equal(first.core_reports,0);assert.equal(first.checkpoint.searched_sources.length,6);
+  const firstPlan=first.checkpoint.search_plan,searchCount=()=>mock.calls.filter(call=>call.url.startsWith('https://api.crossref.org/works')).length,
+    modelRequests=()=>mock.calls.filter(call=>call.url.endsWith('/chat/completions')).map(call=>JSON.parse(call.options.body));
+  const before=searchCount();sourceAvailable=true;await api.handle(`/api/jobs/${first.id}/retry`,{method:'POST'});
+  const second=await settled(api,first.id);
+  assert.equal(second.status,'completed');assert.equal(second.core_reports,1);assert.ok(searchCount()>before);
+  assert.deepEqual(second.checkpoint.search_plan,firstPlan);assert.equal(second.checkpoint.candidates.length,1);assert.equal(store.snapshot().counter,1);
+  assert.equal(modelRequests().filter(body=>JSON.parse(body.messages[1].content).task==='search-plan').length,1);
+  assert.equal(modelRequests().filter(body=>body.messages[0].content.includes('实质相关性筛选')).length,1);
+  assert.equal(modelRequests().filter(body=>JSON.parse(body.messages[1].content).paper).length,1);
+  const analyzed=modelRequests().length,refreshed=searchCount();await api.handle(`/api/jobs/${first.id}/retry`,{method:'POST'});
+  const third=await settled(api,first.id);assert.equal(third.core_reports,1);assert.equal(store.snapshot().counter,1);
+  assert.equal(modelRequests().length,analyzed);assert.equal(searchCount(),refreshed);assert.deepEqual(third.checkpoint.completed,['D001']);
 });
 
 test('cross-project version matches are skipped and wider search fills the requested number with new studies',async()=>{

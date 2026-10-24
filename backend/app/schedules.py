@@ -108,6 +108,7 @@ def tick(enqueue, admission_lock, configuration, current=None, reconcile=None):
                         if candidate.get('status') in ('no_fulltext', 'unverified'):
                             candidate['status'] = 'pending'
                     state['scheduled_retry_at'] = current.isoformat()
+                    state['search_steps'] = []
                     job.checkpoint = json.dumps(state, ensure_ascii=False)
                     job.status, job.cancel, job.error = 'queued', False, ''
                     job.updated_at = current.isoformat()

@@ -200,6 +200,11 @@ main.is-library { padding-top: 30px; }
 .schedule-status { padding: 12px 14px; border-left: 2px solid var(--line); line-height: 1.8; font-size: 13px; overflow-wrap: anywhere; }
 .search-diagnosis { margin-top: 14px; color: var(--muted); font-size: 13px; }
 .search-diagnosis p { margin: 5px 0; }
+.batch-progress{margin:20px 0;padding:20px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.batch-progress-heading,.batch-progress-times{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}.batch-progress-heading strong{font-size:18px}.batch-progress-heading>span{font-variant-numeric:tabular-nums;color:var(--muted)}
+.batch-progress-track{display:block;width:100%;height:9px;margin:15px 0;appearance:none;border:0;background:#e2e6e1;border-radius:0;overflow:hidden}.batch-progress-track::-webkit-progress-bar{background:#e2e6e1}.batch-progress-track::-webkit-progress-value{background:#527260;transition:width .35s ease}.batch-progress-track::-moz-progress-bar{background:#527260}
+.batch-progress-stage{display:flex;align-items:center;gap:9px;margin:12px 0;font-size:14px;color:var(--ink)}.batch-progress-activity{display:inline-block;width:7px;height:7px;background:#8c978e;flex-shrink:0}.is-working .batch-progress-activity{background:#527260;animation:batch-working 1.5s ease-in-out infinite}.batch-progress-times{justify-content:flex-start;gap:12px 32px;font-size:12px;color:var(--muted)}.batch-progress-times strong{font-size:13px;color:var(--ink);font-weight:500;font-variant-numeric:tabular-nums}.batch-progress-note{font-size:12px;color:var(--muted);margin:12px 0 0;line-height:1.7}
+@keyframes batch-working{50%{opacity:.3;transform:scale(.7)}}@media(prefers-reduced-motion:reduce){.is-working .batch-progress-activity{animation:none}.batch-progress-track::-webkit-progress-value{transition:none}}
 .scope-query-preview { grid-column: 1 / -1; background: #f1f3f0; padding: 16px 18px; font-size: 13px; }
 .scope-query-preview dl { margin: 12px 0 0; }
 .scope-query-preview dl > div { display: grid; grid-template-columns: 76px 1fr; gap: 12px; padding: 4px 0; }

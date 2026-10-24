@@ -32,6 +32,7 @@ from .skill import Skill
 from .artifacts import inspect_pdf, challenge_image, export_zip, flow_svg
 from .exporting import clean_export
 from .visual_review import checked_visual_records, project_visual_evidence
+from .timing import freeze_interrupted_timing
 
 
 @asynccontextmanager
@@ -400,6 +401,9 @@ def enqueue(jid):
 def reconcile_job(j):
     """Make worker crashes/timeouts recoverable from the browser after RQ settles."""
     if j.status not in ('queued', 'running'):
+        state = json.loads(j.checkpoint)
+        if freeze_interrupted_timing(state, j.updated_at):
+            j.checkpoint = json.dumps(state, ensure_ascii=False)
         return
     if TASK_BACKEND == 'local':
         from .local_tasks import task_state
@@ -410,6 +414,9 @@ def reconcile_job(j):
             stale = time.time() - __import__('datetime').datetime.fromisoformat(j.updated_at).timestamp() > 120
             if j.status in ('queued', 'running') and (state != 'missing' or stale):
                 j.status, j.error = 'failed', '本机任务已中断；检查点保留，可重试'
+                saved = json.loads(j.checkpoint)
+                if freeze_interrupted_timing(saved, j.updated_at):
+                    j.checkpoint = json.dumps(saved, ensure_ascii=False)
         return
     try:
         q = Queue('analysis', connection=Redis.from_url(REDIS_URL, socket_connect_timeout=2, socket_timeout=2))
@@ -422,6 +429,10 @@ def reconcile_job(j):
     except Exception:
         # A transient Redis outage must not turn a live task into a second execution.
         pass
+    if j.status not in ('queued', 'running'):
+        saved = json.loads(j.checkpoint)
+        if freeze_interrupted_timing(saved, j.updated_at):
+            j.checkpoint = json.dumps(saved, ensure_ascii=False)
 
 
 _admission_lock = threading.RLock()
@@ -567,6 +578,9 @@ def retry_job(jid: str):
         for c in state.get('candidates', []):
             if c['status'] in ('unverified', 'no_fulltext'):
                 c['status'] = 'pending'
+        # A new authorized attempt can discover fresh publications/fulltext.
+        # Keep all source, reading and registration checkpoints intact.
+        state['search_steps'] = []
         j.checkpoint = json.dumps(state, ensure_ascii=False)
         j.status, j.cancel, j.error = 'queued', False, ''
     try:

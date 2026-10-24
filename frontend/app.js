@@ -1,10 +1,11 @@
-import {createGraphView,demoGraphForPapers,syntheticGraphFixture} from './research-graph.js?v=20261023-search2';
-import {openResearchImport,renderImportedSources} from './research-import-ui.js?v=20261023-search2';
-import {demoProject, demoPapers} from './demo.js?v=20261023-search2';
+import {createGraphView,demoGraphForPapers,syntheticGraphFixture} from './research-graph.js?v=20261024-progress1';
+import {openResearchImport,renderImportedSources} from './research-import-ui.js?v=20261024-progress1';
+import {demoProject, demoPapers} from './demo.js?v=20261024-progress1';
 import {activeStatuses, needsEvidence, summarizeBatch, candidateMatches, paperIdsForBatch} from './results.js';
-import {apiOrigin, configurationComplete, scopeConfirmed, workflowState} from './workflow.js?v=20261023-search2';
-import {createBrowserApi} from './browser-api.js?v=20261023-search2';
-import {reportSections, synthesisHtml, hasReportContent, referenceValue, verifiedOriginals} from './research-view.js?v=20261023-search2';
+import {apiOrigin, configurationComplete, scopeConfirmed, workflowState} from './workflow.js?v=20261024-progress1';
+import {createBrowserApi} from './browser-api.js?v=20261024-progress1';
+import {reportSections, synthesisHtml, hasReportContent, referenceValue, verifiedOriginals} from './research-view.js?v=20261024-progress1';
+import {batchProgressHtml,updateBatchProgressTimes} from './research-progress.js?v=20261024-progress1';
 
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -189,11 +190,17 @@ function searchDiagnosisHtml(job){
   return `<div class="search-diagnosis"><p>${esc(reason)}</p>${steps.length?`<p>${steps.slice(0,2).filter(x=>typeof x==='string').map(esc).join('；')}</p>`:''}</div>`;
 }
 function renderBatchSummary(){
+  stopBatchProgressTicker();
   const job=selectedBatch(),el=$('batchSummary');el.hidden=state.demo||!job;if(el.hidden)return;
   const s=summarizeBatch(job),n=batchReportCounts(job).generated;
-  el.innerHTML=`<div class="summary-head"><div><p class="eyebrow">${esc(batchLabel(job))} · ${esc(dateLabel(job.created_at))}</p><h2>${s.target===0?'指定资料分析 · 不计新增':'目标新增 '+s.target+' 篇'}</h2></div>${badge(job.persistence_error?'保存失败 · 请先导出':s.active?job.stage:job.status==='failed'?'分析中断':job.status==='cancelled'?'已取消':n<s.target?'正文待补全':'正文报告已完成',job.persistence_error?'danger':s.active?'neutral':n?'success':'warning')}</div><div class="batch-inline"><span>${s.target===0?'保留原编号与修订记录':'已生成 '+n+'/'+s.target+' 篇正文报告'}</span><button class="quiet" data-materials="${esc(job.id)}">补充论文正文</button>${s.active?`<button class="outline" data-cancel="${esc(job.id)}" ${job.cancel_requested?'disabled':''}>${job.cancel_requested?'正在停止':'停止分析'}</button>`:n<s.target?`<button class="outline" data-retry="${esc(job.id)}">继续检索</button>`:''}</div>${n<s.target?searchDiagnosisHtml(job):''}${s.active&&state.mode==='direct'?'<p>请保持本页打开，报告生成后会自动显示。</p>':''}${job.error?`<p class="error">${esc(job.error)}</p>`:''}`;
+  el.innerHTML=`<div class="summary-head"><div><p class="eyebrow">${esc(batchLabel(job))} · ${esc(dateLabel(job.created_at))}</p><h2>${s.target===0?'指定资料分析 · 不计新增':'目标新增 '+s.target+' 篇'}</h2></div>${badge(job.persistence_error?'保存失败 · 请先导出':s.active?job.stage:job.status==='failed'?'分析中断':job.status==='cancelled'?'已取消':n<s.target?'正文待补全':'正文报告已完成',job.persistence_error?'danger':s.active?'neutral':n?'success':'warning')}</div>${batchProgressHtml(job,{completed:n})}<div class="batch-inline"><button class="quiet" data-materials="${esc(job.id)}">补充论文正文</button>${s.active?`<button class="outline" data-cancel="${esc(job.id)}" ${job.cancel_requested?'disabled':''}>${job.cancel_requested?'正在停止':'停止分析'}</button>`:n<s.target?`<button class="outline" data-retry="${esc(job.id)}">继续检索</button>`:''}</div>${n<s.target?searchDiagnosisHtml(job):''}${s.active&&state.mode==='direct'?'<p class="batch-progress-note">浏览器直连运行中，关闭网页会中断；已保存报告可随时查看。</p>':''}${job.error?`<p class="error">${esc(job.error)}</p>`:''}`;
   bindResultActions(el);
+  if(s.active)renderBatchSummary.progressTicker=setInterval(()=>{
+    if(el.hidden||state.nav!=='library'||state.demo||selectedBatch()?.id!==job.id){stopBatchProgressTicker();return;}
+    const view=updateBatchProgressTimes(el,job,{completed:n});if(!view.running)stopBatchProgressTicker();
+  },1000);
 }
+function stopBatchProgressTicker(){if(renderBatchSummary.progressTicker!=null){clearInterval(renderBatchSummary.progressTicker);renderBatchSummary.progressTicker=null;}}
 function directDraftCount(job){return Number(job.core_reports??job.checkpoint?.core_reports??job.reports_generated??job.checkpoint?.reports_generated??job.drafts_analyzed??job.checkpoint?.drafts_analyzed??(job.checkpoint?.candidates||[]).filter(c=>c.analysis).length)||0;}
 function bindResultActions(root){
   root.querySelectorAll('[data-materials]').forEach(button=>button.onclick=()=>showBatchMaterials(button.dataset.materials));
@@ -203,6 +210,7 @@ function bindResultActions(root){
   root.querySelectorAll('[data-candidate]').forEach(button=>button.onclick=busy(()=>showCandidate(button.dataset.job,Number(button.dataset.candidate))));
 }
 function render(){
+  stopBatchProgressTicker();
   connection();
   if(state.nav==='jobs')state.nav='library';
   if(!state.project||state.nav!=='library')state.nav='home';
